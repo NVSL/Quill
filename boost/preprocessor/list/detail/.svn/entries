@@ -1,0 +1,60 @@
+10
+
+dir
+86326
+http://svn.boost.org/svn/boost/tags/release/Boost_1_44_0/boost/preprocessor/list/detail
+http://svn.boost.org/svn/boost
+
+
+
+2004-09-13T15:51:29.000000Z
+25052
+johnmaddock
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+b8fc166d-592f-0410-95f2-cb63ce0dd405
+
+edg
+dir
+
+dmc
+dir
+
+fold_left.hpp
+file
+
+
+
+
+2012-09-12T20:53:14.000000Z
+3826af218d055eb5db9aadbd57374b0d
+2004-09-13T15:51:29.000000Z
+25052
+johnmaddock
+has-props
+
+fold_right.hpp
+file
+
+
+
+
+2012-09-12T20:53:14.000000Z
+9ec5870eb9372c374efc6be8cf98d71c
+2004-09-13T15:51:29.000000Z
+25052
+johnmaddock
+has-props
+

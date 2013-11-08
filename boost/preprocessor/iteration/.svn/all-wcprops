@@ -1,0 +1,23 @@
+K 25
+svn:wc:ra_dav:version-url
+V 80
+/svn/boost/!svn/ver/64846/tags/release/Boost_1_44_0/boost/preprocessor/iteration
+END
+self.hpp
+K 25
+svn:wc:ra_dav:version-url
+V 89
+/svn/boost/!svn/ver/64846/tags/release/Boost_1_44_0/boost/preprocessor/iteration/self.hpp
+END
+local.hpp
+K 25
+svn:wc:ra_dav:version-url
+V 90
+/svn/boost/!svn/ver/64846/tags/release/Boost_1_44_0/boost/preprocessor/iteration/local.hpp
+END
+iterate.hpp
+K 25
+svn:wc:ra_dav:version-url
+V 92
+/svn/boost/!svn/ver/64846/tags/release/Boost_1_44_0/boost/preprocessor/iteration/iterate.hpp
+END

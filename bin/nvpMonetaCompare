@@ -1,0 +1,32 @@
+#!/bin/bash
+
+export MONETA_LIB_BUILD
+
+if [ "$MONETA_LIB_BUILD." = "." ] ; then
+    MONETA_LIB_BUILD=RELEASE
+fi
+
+echo Build mode: $MONETA_LIB_BUILD
+
+export MONETA_LIB_VERSION=
+export NVP_LIB_DIR=${BEE3HOME}/Tools/PosixNVM
+export MONETA_LIB_DIR=${BEE3HOME}/Tools/BEE3/library/src${MONETA_LIB_VERSION}/build/${MONETA_LIB_BUILD}
+
+LD_LIBRARY_PATH=$NVP_LIB_DIR:$MONETA_LIB_DIR:$LD_LIBRARY_PATH
+
+export LD_PRELOAD="libnvp.so libmoneta.so";
+
+WRAP=MONETA
+
+if [ "$WRAP" = "MONETA" ]; then
+    
+# wrap moneta
+    export NVP_TREE_FILE="${BEE3HOME}/Tools/PosixNVM/bin/nvp_moneta.tree";
+else
+    
+    
+# wrap posix;
+    export NVP_TREE_FILE="${BEE3HOME}/Tools/PosixNVM/bin/nvp_wrap.tree";
+fi
+
+eval "$@"

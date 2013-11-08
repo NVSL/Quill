@@ -1,0 +1,9 @@
+#!/bin/bash
+
+WRAPPED=read,write,open,close,lseek,pread,pwrite,truncate,mmap,execve,dup2,ftruncate
+
+DONT_CARE=fstat,socket,fcntl,arch_prctl,mprotect,brk,stat,munmap,set_tid_address,set_robust_list,rt_sigaction,getrlimit,futex,access,select,rt_sigreturn,fdatasync,rt_sigprocmask,alarm,unlink,getdents,_exit,nanosleep,getcwd,getpid,gettid,clone,connect,sendmsg,uname,lstat,fchdir,wait4,exit_group,getegid,getuid,geteuid,getppid,getpgrp,chdir,setrlimit,getgid,getrusage,umask,chmod,getgroups,
+
+#UNKNOWN=ioctl,vfork,pipe,readv,writev,
+
+strace -q -e signal=none -e trace=!$WRAPPED,$DONT_CARE,$UNKNOWN $@
