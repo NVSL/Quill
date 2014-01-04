@@ -843,13 +843,14 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
 	//int iter;
+	int cpuid = -1;
 	NVP_LOCK_FD_WR(nvf); // TODO
 	NVP_CHECK_NVF_VALID_WR(nvf);
-	NVP_LOCK_NODE_WR(nvf); //TODO
+	NVP_LOCK_NODE_RD(nvf, cpuid); //TODO
 
 	RETT_WRITE result = _nvp_do_pwrite(CALL_WRITE, *nvf->offset);
 
-	NVP_UNLOCK_NODE_WR(nvf);
+	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 
 	if(result >= 0)
 	{
