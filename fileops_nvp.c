@@ -807,6 +807,41 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 	return result;
 }
 
+static ssize_t _nvp_check_read_size_valid(size_t count)
+{ 
+	if(count == 0)
+	{
+		DEBUG("Requested a read of 0 length.  No problem\n");
+		return 0;
+	}
+	else if(count < 0)
+	{
+		DEBUG("Requested read of negative bytes (%li)\n", count);
+		errno = EINVAL;
+		return -1;
+	}
+
+	return count;
+}
+
+static ssize_t _nvp_check_write_size_valid(size_t count)
+{
+	if(count == 0)
+	{
+		DEBUG("Requested a write of 0 bytes.  No problem\n");
+		return 0;
+	}
+
+	if(((signed long long int)count) < 0)
+	{
+		DEBUG("Requested a write of %li < 0 bytes.\n", (signed long long int)count);
+		errno = EINVAL;
+		return -1;
+	}
+
+	return count;
+}
+
 RETT_READ _nvp_READ(INTF_READ)
 {
 	DEBUG("_nvp_READ\n");
@@ -814,24 +849,34 @@ RETT_READ _nvp_READ(INTF_READ)
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	
 	int cpuid = -1;
-	NVP_LOCK_FD_WR(nvf); // TODO
+
+	RETT_READ result = _nvp_check_read_size_valid(length);
+	if (result <= 0)
+		return result;
+
+	NVP_LOCK_FD_RD(nvf, cpuid); // TODO
 	NVP_CHECK_NVF_VALID_WR(nvf);
+
 	NVP_LOCK_NODE_RD(nvf, cpuid);
 
-	RETT_READ result = _nvp_do_pread(CALL_READ, *nvf->offset);
+	result = _nvp_do_pread(CALL_READ, __sync_fetch_and_add(nvf->offset, length));
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	
-	if(result >= 0)	{
-		DEBUG("PREAD succeeded: extending offset from %li to %li\n", *nvf->offset, *nvf->offset + result);
-		*nvf->offset += result;
+	if(result == length)	{
+		DEBUG("PREAD succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
 	}
-	else {
+	else if (result <= 0){
 		DEBUG("_nvp_READ: PREAD failed; not changing offset. (returned %i)\n", result);
 		// assert(0); // TODO: this is for testing only
+		__sync_fetch_and_sub(nvf->offset, length);
+	} else {
+		DEBUG("_nvp_READ: PREAD failed; Not fully read. (returned %i)\n", result);
+		// assert(0); // TODO: this is for testing only
+		__sync_fetch_and_sub(nvf->offset, length - result);
 	}
 
-	NVP_UNLOCK_FD_WR(nvf);
+	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	return result;
 }
@@ -844,11 +889,15 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 
 	//int iter;
 	int cpuid = -1;
-	NVP_LOCK_FD_WR(nvf); // TODO
+	RETT_WRITE result = _nvp_check_write_size_valid(length);
+	if (result <= 0)
+		return result;
+
+	NVP_LOCK_FD_RD(nvf, cpuid); // TODO
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid); //TODO
 
-	RETT_WRITE result = _nvp_do_pwrite(CALL_WRITE, *nvf->offset);
+	result = _nvp_do_pwrite(CALL_WRITE, __sync_fetch_and_add(nvf->offset, length));
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 
@@ -856,7 +905,7 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 	{
 		if(nvf->append)
 		{
-			size_t temp_offset = *nvf->offset;
+			size_t temp_offset = __sync_fetch_and_add(nvf->offset, 0);
 			DEBUG("PWRITE succeeded and append == true.  Setting offset to end...\n"); 
 			assert(_nvp_do_seek64(nvf->fd, 0, SEEK_END) != (RETT_SEEK64)-1);
 			DEBUG("PWRITE: offset changed from %li to %li\n", temp_offset, *nvf->offset);
@@ -864,8 +913,8 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 		}
 		else
 		{
-			DEBUG("PWRITE succeeded: extending offset from %li to %li\n", *nvf->offset, *nvf->offset + result);
-			*nvf->offset += result;
+			DEBUG("PWRITE succeeded: extending offset from %li to %li\n", *nvf->offset - offset, *nvf->offset);
+//			*nvf->offset += result;
 		}
 	}
 	else {
@@ -877,7 +926,7 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 
 	DO_MSYNC(nvf);
 
-	NVP_UNLOCK_FD_WR(nvf);
+	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	return result;
 }
@@ -889,13 +938,17 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 	DEBUG("_nvp_PREAD\n");
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
-	
+
+	RETT_PREAD result = _nvp_check_read_size_valid(count);
+	if (result <= 0)
+		return result;
+
 	int cpuid = -1;
 	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid);
 
-	RETT_PREAD result = _nvp_do_pread(CALL_PREAD);
+	result = _nvp_do_pread(CALL_PREAD);
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
@@ -911,7 +964,9 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	
-	RETT_PWRITE result;
+	RETT_PWRITE result = _nvp_check_write_size_valid(count);
+	if (result <= 0)
+		return result;
 	
 	int cpuid = -1;
 	NVP_LOCK_FD_RD(nvf, cpuid);
@@ -952,17 +1007,6 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD)
 		return -1;
 	}
 
-	if(UNLIKELY(count == 0))
-	{
-		DEBUG("Requested a read of 0 length.  No problem\n");
-		return 0;
-	}
-	else if(UNLIKELY(count < 0))
-	{
-		DEBUG("Requested read of negative bytes (%li)\n", count);
-		errno = EINVAL;
-		return -1;
-	}
 	else if(UNLIKELY(offset < 0))
 	{
 		DEBUG("Requested read at negative offset (%li)\n", offset);
@@ -1085,19 +1129,6 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 	if(UNLIKELY(!nvf->canWrite)) {
 		DEBUG("FD not open for writing: %i\n", file);
 		errno = EBADF;
-		return -1;
-	}
-
-	if(UNLIKELY(count == 0))
-	{
-		DEBUG("Requested a write of 0 bytes.  No problem\n");
-		return 0;
-	}
-
-	if(UNLIKELY(((signed long long int)count) < 0))
-	{
-		DEBUG("Requested a write of %li < 0 bytes.\n", (signed long long int)count);
-		errno = EINVAL;
 		return -1;
 	}
 
