@@ -288,6 +288,20 @@ static void * mmx2_memcpy(void * __restrict__ to, const void * __restrict__ from
   return retval;
 }
 
+static char* memcpy1(char *to, char *from, size_t n)
+{
+	long esi, edi;
+	int ecx;
+	esi = (long)from;
+	edi = (long)to;
+	asm volatile("rep ; movsl"
+		: "=&c" (ecx), "=&D" (edi), "=&S" (esi)
+		: "0" (n / 4), "1" (edi), "2" (esi)
+		: "memory"
+		);
+	return to;
+}
+
 
 //////////////////////////
 
@@ -297,6 +311,7 @@ static void * mmx2_memcpy(void * __restrict__ to, const void * __restrict__ from
 //#define MEMCPY (void*)copy_from_user_inatomic_nocache
 //#define MEMCPY my_memcpy_nocache
 #define MEMCPY mmx2_memcpy
+//#define MEMCPY memcpy1
 #define MMAP mmap
 #define FSYNC fsync
 
