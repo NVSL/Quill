@@ -55,7 +55,8 @@ static inline int _nvp_get_cpuid(void)
 
 
 #define NVP_LOCK_RD(lock, cpuid) \
-	cpuid = _nvp_get_cpuid(); \
+	if (cpuid == -1) \
+		cpuid = _nvp_get_cpuid(); \
 	SANITY(cpuid<(NVP_NUM_LOCKS/2)); \
 	DEBUG("NVP_RDLOCK requested on CPU %i\n", cpuid); \
 	NVP_LOCK_CHECK(pthread_rwlock_rdlock(&lock[cpuid*2])); \
@@ -103,7 +104,8 @@ static inline int _nvp_get_cpuid(void)
 #define SANITY assert
 
 #define NVP_LOCK_RD(lock, cpuid) \
-	cpuid = _nvp_get_cpuid(); \
+	if (cpuid == -1) \
+		cpuid = _nvp_get_cpuid(); \
 	SANITY(cpuid<(NVP_NUM_LOCKS/2)); \
 	DEBUG("NVP_RDLOCK requested on CPU %i\n", cpuid); \
 	while(__sync_fetch_and_add(&lock[cpuid * 2], 1) >= WR_HELD) \

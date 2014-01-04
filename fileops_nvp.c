@@ -122,7 +122,7 @@ MODULE_REGISTRATION_F("nvp", _nvp_, _nvp_init2(); );
 	if(UNLIKELY(!nvf->valid)) { \
 		DEBUG("Invalid file descriptor: %i\n", file); \
 		errno = EBADF; \
-		NVP_UNLOCK_FD_RD(nvf, cpuid_fd); \
+		NVP_UNLOCK_FD_RD(nvf, cpuid); \
 		return -1; \
 	} \
 	else \
@@ -813,14 +813,14 @@ RETT_READ _nvp_READ(INTF_READ)
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	
-	int cpuid_node;
+	int cpuid = -1;
 	NVP_LOCK_FD_WR(nvf); // TODO
 	NVP_CHECK_NVF_VALID_WR(nvf);
-	NVP_LOCK_NODE_RD(nvf, cpuid_node);
+	NVP_LOCK_NODE_RD(nvf, cpuid);
 
 	RETT_READ result = _nvp_do_pread(CALL_READ, *nvf->offset);
 
-	NVP_UNLOCK_NODE_RD(nvf, cpuid_node);
+	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	
 	if(result >= 0)	{
 		DEBUG("PREAD succeeded: extending offset from %li to %li\n", *nvf->offset, *nvf->offset + result);
@@ -889,15 +889,15 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	
-	int cpuid_fd, cpuid_node;
-	NVP_LOCK_FD_RD(nvf, cpuid_fd);
+	int cpuid = -1;
+	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);
-	NVP_LOCK_NODE_RD(nvf, cpuid_node);
+	NVP_LOCK_NODE_RD(nvf, cpuid);
 
 	RETT_PREAD result = _nvp_do_pread(CALL_PREAD);
 
-	NVP_UNLOCK_NODE_RD(nvf, cpuid_node);
-	NVP_UNLOCK_FD_RD(nvf, cpuid_fd);
+	NVP_UNLOCK_NODE_RD(nvf, cpuid);
+	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	return result;
 }
@@ -912,17 +912,16 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 	
 	RETT_PWRITE result;
 	
-	int cpuid_fd;
-	int cpuid_node;
-	NVP_LOCK_FD_RD(nvf, cpuid_fd);
+	int cpuid = -1;
+	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);
-	NVP_LOCK_NODE_RD(nvf, cpuid_node);
+	NVP_LOCK_NODE_RD(nvf, cpuid);
 	
 	ssize_t available_length = (nvf->node->length) - offset;
 
 	if(count > available_length) {
 		DEBUG("Promoting PWRITE lock to WRLOCK\n");
-		NVP_UNLOCK_NODE_RD(nvf, cpuid_node);
+		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 		NVP_LOCK_NODE_WR(nvf);
 		
 		result = _nvp_do_pwrite(CALL_PWRITE);
@@ -931,10 +930,10 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 	}
 	else {
 		result = _nvp_do_pwrite(CALL_PWRITE);
-		NVP_UNLOCK_NODE_RD(nvf, cpuid_node);
+		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	}
 
-	NVP_UNLOCK_FD_RD(nvf, cpuid_fd);
+	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	return result;
 }
@@ -1246,14 +1245,14 @@ RETT_SEEK64 _nvp_SEEK64(INTF_SEEK64)
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	
-	int cpuid_node;
+	int cpuid = -1;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
-	NVP_LOCK_NODE_RD(nvf, cpuid_node);
+	NVP_LOCK_NODE_RD(nvf, cpuid);
 
 	RETT_SEEK64 result =  _nvp_do_seek64(CALL_SEEK64);	
 
-	NVP_UNLOCK_NODE_RD(nvf, cpuid_node);
+	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_WR(nvf);
 
 	return result;
@@ -1329,8 +1328,8 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
-	int cpuid_fd;
-	NVP_LOCK_FD_RD(nvf, cpuid_fd);
+	int cpuid = -1;
+	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);
 	NVP_LOCK_NODE_WR(nvf);
 
@@ -1339,7 +1338,7 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 	//	errno = EBADF;
 		errno = EINVAL;
 		NVP_UNLOCK_NODE_WR(nvf);
-		NVP_UNLOCK_FD_RD(nvf, cpuid_fd);
+		NVP_UNLOCK_FD_RD(nvf, cpuid);
 		return -1;
 	}
 
@@ -1348,7 +1347,7 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 		DEBUG("_nvp_TRUNC64: requested length was the same as old length (%li).\n",
 			nvf->node->length);
 		NVP_UNLOCK_NODE_WR(nvf);
-		NVP_UNLOCK_FD_RD(nvf, cpuid_fd);
+		NVP_UNLOCK_FD_RD(nvf, cpuid);
 		return 0;
 	}
 
@@ -1382,7 +1381,7 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 	DO_MSYNC(nvf);
 
 	NVP_UNLOCK_NODE_WR(nvf);
-	NVP_UNLOCK_FD_RD(nvf, cpuid_fd);
+	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	return result;
 }
