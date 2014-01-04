@@ -1,2 +1,0 @@
-hub(posix,wrap(harness(posix,nvp(posix))))
-

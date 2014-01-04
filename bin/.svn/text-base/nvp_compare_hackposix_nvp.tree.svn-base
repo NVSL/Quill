@@ -1,2 +1,0 @@
-hub(posix,wrap(harness(hackmmap(posix),nvp(posix))))
-
