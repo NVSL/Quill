@@ -24,7 +24,7 @@ static inline int _nvp_get_cpuid(void)
 }
 
 #ifndef USE_PTHREAD_LOCK
-	#define	USE_PTHREAD_LOCK 1
+	#define	USE_PTHREAD_LOCK 0
 #endif
 
 // double the number of logical cores: each lock takes up half a cache line, so to
