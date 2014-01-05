@@ -95,9 +95,9 @@ static inline int _nvp_get_cpuid(void)
 
 #define WR_HELD	(1 << 31)
 
-#define NVP_LOCK_DECL uint32_t lock[NVP_NUM_LOCKS]
+#define NVP_LOCK_DECL uint32_t lock[NVP_NUM_LOCKS * 16]
 
-#define NVP_LOCK_INIT(lock) { int iter; for(iter=0; iter<NVP_NUM_LOCKS; iter++) { lock[iter] = 0; } }
+#define NVP_LOCK_INIT(lock) { int iter; for(iter=0; iter<NVP_NUM_LOCKS * 16; iter++) { lock[iter] = 0; } }
 
 	#define NVP_LOCK_CHECK(statement) statement
 
@@ -108,21 +108,21 @@ static inline int _nvp_get_cpuid(void)
 		cpuid = sched_getcpu(); \
 	SANITY(cpuid<(NVP_NUM_LOCKS/2)); \
 	DEBUG("NVP_RDLOCK requested on CPU %i\n", cpuid); \
-	while(__sync_fetch_and_add(&lock[cpuid * 2], 1) >= WR_HELD) \
-		__sync_fetch_and_sub(&lock[cpuid * 2], 1); \
+	while(__sync_fetch_and_add(&lock[cpuid * 2 * 16], 1) >= WR_HELD) \
+		__sync_fetch_and_sub(&lock[cpuid * 2 * 16], 1); \
 	DEBUG("NVP_RDLOCK acquired on CPU %i\n", cpuid)
 
 #define NVP_LOCK_UNLOCK_RD(lock, cpuid) \
 	DEBUG("Releasing NVP_RDLOCK on CPU %i\n", cpuid); \
 	SANITY(cpuid<(NVP_NUM_LOCKS/2)); \
-	__sync_fetch_and_sub(&lock[cpuid * 2], 1); \
+	__sync_fetch_and_sub(&lock[cpuid * 2 * 16], 1); \
 	DEBUG("NVP_RDLOCK released on CPU %i\n", cpuid)
 
 
 #define NVP_LOCK_WR(lock) { int iter; \
 	DEBUG("NVP_WRLOCK requested on cpu %i\n", sched_getcpu()); \
 	for(iter=0; iter<NVP_NUM_LOCKS; iter+=2) { \
-		while(!__sync_bool_compare_and_swap(&lock[iter], 0, WR_HELD)) \
+		while(!__sync_bool_compare_and_swap(&lock[iter * 16], 0, WR_HELD)) \
 			; \
 	} \
 	DEBUG("NVP_WRLOCK acquired on cpu %i\n", sched_getcpu()); \
@@ -131,7 +131,7 @@ static inline int _nvp_get_cpuid(void)
 #define NVP_LOCK_UNLOCK_WR(lock) { int iter; \
 	DEBUG("NVP_WRLOCK releasing on cpu %i\n", sched_getcpu()); \
 	for(iter=0; iter<NVP_NUM_LOCKS; iter+=2) { \
-		__sync_fetch_and_sub(&lock[iter], WR_HELD); \
+		__sync_fetch_and_sub(&lock[iter * 16], WR_HELD); \
 	} \
 	DEBUG("NVP_WRLOCK released on cpu %i\n", sched_getcpu()); \
 	}
