@@ -41,7 +41,8 @@ LIBNVP_TREE_DIR=$(BEE3HOME)/test/PosixNVM/bin/
 
 #LOAD_DIR_X=/x/HotStorage2011-NVP
 
-COPTIMIZATIONS = -O3 -m64
+COPTIMIZATIONS = -m64
+#COPTIMIZATIONS = -O3 -m64
 #COPTIMIZATIONS = -O3 -march=core2 -m64
 
 #-march=core2 -minline-all-stringops -m64 -fprefetch-loop-arrays
