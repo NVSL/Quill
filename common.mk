@@ -87,6 +87,7 @@ check_moneta:
 	if [ "`stat . | grep 'Device: fb00h' | wc -l`" == "0" ]; then echo "FAILURE: Current directory is NOT on a Moneta device!" | $(HIGHLIGHTFAILURE) ; exit 1; else echo "SUCCESS: Current directory is on a Moneta device." | $(HIGHLIGHTFAILURE); fi
 
 
-
+USE_PTHREAD_LOCK=0
+USE_SCHED_GETCPU=1
 
 
