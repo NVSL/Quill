@@ -36,8 +36,8 @@ int gettimeofday(struct timeval *tv, struct timezone *tz);
 
 #define COUNT_EXTENDS 0
 #if COUNT_EXTENDS
-	volatile size_t _nvp_wr_extended;
-	volatile size_t _nvp_wr_total;
+	volatile size_t _bankshot2_wr_extended;
+	volatile size_t _bankshot2_wr_total;
 #endif
 
 
@@ -54,14 +54,14 @@ int gettimeofday(struct timeval *tv, struct timezone *tz);
 #define NVP_UNLOCK_NODE_WR(nvf)		NVP_LOCK_UNLOCK_WR(nvf->node->lock)
 
 
-BOOST_PP_SEQ_FOR_EACH(DECLARE_WITHOUT_ALIAS_FUNCTS_IWRAP, _nvp_, ALLOPS_WPAREN)
+BOOST_PP_SEQ_FOR_EACH(DECLARE_WITHOUT_ALIAS_FUNCTS_IWRAP, _bankshot2_, ALLOPS_WPAREN)
 
-RETT_OPEN _nvp_OPEN(INTF_OPEN);
-RETT_IOCTL _nvp_IOCTL(INTF_IOCTL);
+RETT_OPEN _bankshot2_OPEN(INTF_OPEN);
+RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL);
 
 int MMAP_PAGE_SIZE;
 
-void* _nvp_zbuf; // holds all zeroes.  used for aligned file extending. TODO: does sharing this hurt performance?
+void* _bankshot2_zbuf; // holds all zeroes.  used for aligned file extending. TODO: does sharing this hurt performance?
 
 
 struct NVFile
@@ -89,16 +89,16 @@ struct NVNode
 //	volatile int valid; // for debugging purposes
 };
 
-struct NVFile* _nvp_fd_lookup;
+struct NVFile* _bankshot2_fd_lookup;
 
-void _nvp_init2(void);
-int _nvp_extend_map(int file, size_t newlen);
-void _nvp_SIGBUS_handler(int sig);
-void _nvp_test_invalidate_node(struct NVFile* nvf);
+void _bankshot2_init2(void);
+int _bankshot2_extend_map(int file, size_t newlen);
+void _bankshot2_SIGBUS_handler(int sig);
+void _bankshot2_test_invalidate_node(struct NVFile* nvf);
 
-RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE); // like PWRITE, but without locks (called by _nvp_WRITE)
-RETT_PWRITE _nvp_do_pread (INTF_PREAD ); // like PREAD , but without locks (called by _nvp_READ )
-RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_write
+RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE); // like PWRITE, but without locks (called by _bankshot2_WRITE)
+RETT_PWRITE _bankshot2_do_pread (INTF_PREAD ); // like PREAD , but without locks (called by _bankshot2_READ )
+RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_write
 
 #define DO_MSYNC(nvf) do{ \
 	DEBUG("NOT doing a msync\n"); }while(0)
@@ -110,13 +110,13 @@ RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_
 	} }while(0)
 */
 
-int _nvp_lock_return_val;
-int _nvp_write_pwrite_lock_handoff;
+int _bankshot2_lock_return_val;
+int _bankshot2_write_pwrite_lock_handoff;
 
 
 //void * mremap(void *old_address, size_t old_size, size_t new_size, int flags);
 
-MODULE_REGISTRATION_F("nvp", _nvp_, _nvp_init2(); );
+MODULE_REGISTRATION_F("bankshot2", _bankshot2_, _bankshot2_init2(); );
 
 #define NVP_CHECK_NVF_VALID(nvf) do{ \
 	if(UNLIKELY(!nvf->valid)) { \
@@ -163,21 +163,21 @@ MODULE_REGISTRATION_F("nvp", _nvp_, _nvp_init2(); );
 
 
 #define NVP_WRAP_HAS_FD(op) \
-	RETT_##op _nvp_##op ( INTF_##op ) { \
-		CHECK_RESOLVE_FILEOPS(_nvp_);\
-		DEBUG("_nvp_"#op" is just wrapping %s->"#op"\n", _nvp_fileops->name); \
+	RETT_##op _bankshot2_##op ( INTF_##op ) { \
+		CHECK_RESOLVE_FILEOPS(_bankshot2_);\
+		DEBUG("_bankshot2_"#op" is just wrapping %s->"#op"\n", _bankshot2_fileops->name); \
 		if(UNLIKELY(file>=OPEN_MAX)) { DEBUG("file descriptor too large (%i > %i)\n", file, OPEN_MAX-1); errno = EBADF; return (RETT_##op) -1; } \
 		if(UNLIKELY(file<0)) { DEBUG("file < 0 (file = %i).  return -1;\n", file); errno = EBADF; return (RETT_##op) -1; } \
-		if(UNLIKELY(!_nvp_fd_lookup[file].valid)) { DEBUG("That file descriptor (%i) is invalid\n", file); errno = EBADF; return -1; } \
-		DEBUG("_nvp_" #op " is calling %s->" #op "\n", _nvp_fileops->name); \
-		return (RETT_##op) _nvp_fileops->op( CALL_##op ); \
+		if(UNLIKELY(!_bankshot2_fd_lookup[file].valid)) { DEBUG("That file descriptor (%i) is invalid\n", file); errno = EBADF; return -1; } \
+		DEBUG("_bankshot2_" #op " is calling %s->" #op "\n", _bankshot2_fileops->name); \
+		return (RETT_##op) _bankshot2_fileops->op( CALL_##op ); \
 	}
 
 #define NVP_WRAP_NO_FD(op) \
-	RETT_##op _nvp_##op ( INTF_##op ) { \
-		CHECK_RESOLVE_FILEOPS(_nvp_);\
-		DEBUG("_nvp_"#op" is just wrapping %s->"#op"\n", _nvp_fileops->name); \
-		return _nvp_fileops->op( CALL_##op ); \
+	RETT_##op _bankshot2_##op ( INTF_##op ) { \
+		CHECK_RESOLVE_FILEOPS(_bankshot2_);\
+		DEBUG("_bankshot2_"#op" is just wrapping %s->"#op"\n", _bankshot2_fileops->name); \
+		return _bankshot2_fileops->op( CALL_##op ); \
 	}
 
 #define NVP_WRAP_HAS_FD_IWRAP(r, data, elem) NVP_WRAP_HAS_FD(elem)
@@ -245,7 +245,7 @@ static void * mmx2_memcpy(void * __restrict__ to, const void * __restrict__ from
     {
       delta=MMX_MMREG_SIZE-delta;
       len -= delta;
-      __memcpy(to, from, delta);
+      memcpy(to, from, delta);
     }
     i = len >> 6; /* len/64 */
     len&=63;
@@ -284,7 +284,7 @@ static void * mmx2_memcpy(void * __restrict__ to, const void * __restrict__ from
   /*
    *	Now do the tail of the block
    */
-  if(len) __memcpy(to, from, len);
+  if(len) memcpy(to, from, len);
   return retval;
 }
 
@@ -398,34 +398,34 @@ long long unsigned int total_memcpy_cycles = 0;
 void report_memcpy_usec(void) { printf("Total memcpy time: %llu cycles: %f seconds\n", total_memcpy_cycles, ((float)(total_memcpy_cycles))/(2.27f*1024*1024*1024) ); }
 #endif
 
-void _nvp_init2(void)
+void _bankshot2_init2(void)
 {
 	#if TIME_READ_MEMCPY
 	atexit(report_memcpy_usec);
 	#endif
 
-	_nvp_write_pwrite_lock_handoff = 0;
+	_bankshot2_write_pwrite_lock_handoff = 0;
 
-	assert(!posix_memalign(((void**)&_nvp_zbuf), 4096, 4096));
+	assert(!posix_memalign(((void**)&_bankshot2_zbuf), 4096, 4096));
 
-	_nvp_fd_lookup = (struct NVFile*) calloc(OPEN_MAX, sizeof(struct NVFile));
+	_bankshot2_fd_lookup = (struct NVFile*) calloc(OPEN_MAX, sizeof(struct NVFile));
 
 	int i;
 	for(i=0; i<OPEN_MAX; i++) {
-		_nvp_fd_lookup[i].valid = 0;
-		NVP_LOCK_INIT(_nvp_fd_lookup[i].lock);
+		_bankshot2_fd_lookup[i].valid = 0;
+		NVP_LOCK_INIT(_bankshot2_fd_lookup[i].lock);
 	}
 
 	MMAP_PAGE_SIZE = getpagesize();
 	SANITYCHECK(MMAP_PAGE_SIZE > 100);
 
 	#if COUNT_EXTENDS
-	_nvp_wr_extended = 0;
-	_nvp_wr_total    = 0;
+	_bankshot2_wr_extended = 0;
+	_bankshot2_wr_total    = 0;
 	#endif
 
 	DEBUG("Installing SIGBUS handler.\n");
-	signal(SIGBUS, _nvp_SIGBUS_handler);
+	signal(SIGBUS, _bankshot2_SIGBUS_handler);
 
 	//TODO
 	/*
@@ -433,26 +433,26 @@ void _nvp_init2(void)
 	MSG("Importing memcpy from %s\n", GLIBC_LOC);
 	*/
 
-//	_nvp_debug_handoff();
+//	_bankshot2_debug_handoff();
 }
 
 #if COUNT_EXTENDS
-void _nvp_print_extend_stats(void) __attribute__ ((destructor));
-void _nvp_print_extend_stats(void)
+void _bankshot2_print_extend_stats(void) __attribute__ ((destructor));
+void _bankshot2_print_extend_stats(void)
 {
 	FILE * pFile;
 	pFile = fopen ("results.txt","w");
-	fprintf(pFile, "extended: %li\ntotal: %li\nratio: %f\n", _nvp_wr_extended, _nvp_wr_total, ((float)_nvp_wr_extended)/(_nvp_wr_extended+_nvp_wr_total));
+	fprintf(pFile, "extended: %li\ntotal: %li\nratio: %f\n", _bankshot2_wr_extended, _bankshot2_wr_total, ((float)_bankshot2_wr_extended)/(_bankshot2_wr_extended+_bankshot2_wr_total));
 	fclose (pFile);
-	DEBUG("NVP: writes which extended: %li\n", _nvp_wr_extended);
-	DEBUG("NVP: total writes         : %li\n", _nvp_wr_total);
-	//DEBUG("NVP: extended/total       : %f\n", ((float)_nvp_wr_extended)/(_nvp_wr_extended+_nvp_wr_total));
+	DEBUG("NVP: writes which extended: %li\n", _bankshot2_wr_extended);
+	DEBUG("NVP: total writes         : %li\n", _bankshot2_wr_total);
+	//DEBUG("NVP: extended/total       : %f\n", ((float)_bankshot2_wr_extended)/(_bankshot2_wr_extended+_bankshot2_wr_total));
 }
 #endif
 
-RETT_OPEN _nvp_OPEN(INTF_OPEN)
+RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
 	if(path==NULL) {
 		DEBUG("Invalid path.\n");
@@ -460,9 +460,9 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		return -1;
 	}
 	
-	DEBUG("_nvp_OPEN(%s)\n", path);
+	DEBUG("_bankshot2_OPEN(%s)\n", path);
 	
-	DEBUG("Attempting to _nvp_OPEN the file \"%s\" with the following flags (0x%X): ", path, oflag);
+	DEBUG("Attempting to _bankshot2_OPEN the file \"%s\" with the following flags (0x%X): ", path, oflag);
 
 	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
 		DEBUG_P("O_RDWR ");
@@ -523,7 +523,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		}
 		else
 		{
-			DEBUG("File at path %s is NOT a regular file!  INCONCEIVABLE\n", path);
+			ERROR("File at path %s is NOT a regular file!  INCONCEIVABLE\n", path);
 			assert(S_ISREG(file_st.st_mode));
 		}
 	}
@@ -544,9 +544,9 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		int i;
 		for(i=0; i<OPEN_MAX; i++)
 		{
-			if( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st.st_ino) {
+			if( _bankshot2_fd_lookup[i].node && _bankshot2_fd_lookup[i].node->serialno == file_st.st_ino) {
 				DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
-				node = _nvp_fd_lookup[i].node;
+				node = _bankshot2_fd_lookup[i].node;
 				SANITYCHECK(node != NULL);
 				// when sharing nodes it's good to msync in case of multithreading // TODO is this true?
 				if(msync(node->data, node->maplength, MS_SYNC|MS_INVALIDATE)) {
@@ -575,25 +575,25 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		va_start(arg, oflag);
 		int mode = va_arg(arg, int);
 		va_end(arg);
-		result = _nvp_fileops->OPEN(path, oflag & (~O_APPEND), mode);
+		result = _bankshot2_fileops->OPEN(path, oflag & (~O_APPEND), mode);
 	} else {
-		result = _nvp_fileops->OPEN(path, oflag & (~O_APPEND));
+		result = _bankshot2_fileops->OPEN(path, oflag & (~O_APPEND));
 	}
 
 	if(result<0)
 	{
-		DEBUG("_nvp_OPEN->%s_OPEN failed: %s\n", _nvp_fileops->name, strerror(errno));
+		DEBUG("_bankshot2_OPEN->%s_OPEN failed: %s\n", _bankshot2_fileops->name, strerror(errno));
 		return result;
 	}	
 
-	SANITYCHECK(&_nvp_fd_lookup[result] != NULL);
+	SANITYCHECK(&_bankshot2_fd_lookup[result] != NULL);
 	
-	struct NVFile* nvf = &_nvp_fd_lookup[result];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[result];
 	NVP_LOCK_FD_WR(nvf);
 
-	DEBUG("_nvp_OPEN succeeded for path %s: fd %i returned.  filling in file info\n", path, result);
+	DEBUG("_bankshot2_OPEN succeeded for path %s: fd %i returned.  filling in file info\n", path, result);
 
-	if(_nvp_fd_lookup[result].valid)
+	if(_bankshot2_fd_lookup[result].valid)
 	{
 		ERROR("There is already a file open with that FD (%i)!\n", result);
 		assert(0);
@@ -625,9 +625,9 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		int i;
 		for(i=0; i<OPEN_MAX; i++)
 		{
-			if( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st.st_ino) {
+			if( _bankshot2_fd_lookup[i].node && _bankshot2_fd_lookup[i].node->serialno == file_st.st_ino) {
 				DEBUG("File %s is (or was) already open in fd %i (this fd is fd %i)!  Sharing nodes.\n", path, i, result);
-				node = _nvp_fd_lookup[i].node;
+				node = _bankshot2_fd_lookup[i].node;
 				SANITYCHECK(node != NULL);
 				// when sharing nodes it's good to msync in case of multithreading // TODO is this true?
 				if(msync(node->data, node->maplength, MS_SYNC|MS_INVALIDATE)) {
@@ -640,7 +640,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		if(node==NULL) {
 			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
-			NVP_LOCK_INIT(_nvp_fd_lookup[i].lock);
+			NVP_LOCK_INIT(_bankshot2_fd_lookup[i].lock);
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
@@ -652,13 +652,13 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	{
 		if(file_st.st_size != 0)
 		{
-			WARNING("O_TRUNC was set, but after %s->OPEN, file length was not 0!\n", _nvp_fileops->name);
+			WARNING("O_TRUNC was set, but after %s->OPEN, file length was not 0!\n", _bankshot2_fileops->name);
 			WARNING("This is probably the result of another thread modifying the underlying node before we could get a lock on it.\n");
 			//assert(0);
 		}
 		else
 		{
-			DEBUG("O_TRUNC was set, and after %s->OPEN file length was 0 (as it should be).\n", _nvp_fileops->name);
+			DEBUG("O_TRUNC was set, and after %s->OPEN file length was 0 (as it should be).\n", _bankshot2_fileops->name);
 		}
 	}
 
@@ -689,7 +689,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		nvf->canRead = 1;
 		nvf->canWrite = 0;
 	} else {
-		DEBUG("File permissions don't include read or write!\n");
+		ERROR("File permissions don't include read or write!\n");
 		nvf->canRead = 0;
 		nvf->canWrite = 0;
 		assert(0);
@@ -710,7 +710,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	{
 		DEBUG("Map didn't have write perms, but it's about to.  We're going to need a new map.\n");
 		nvf->node->maxPerms |= PROT_WRITE;
-		//_nvp_extend_map(nvf->fd, nvf->node->maplength+1); // currently set to get a new map every time
+		//_bankshot2_extend_map(nvf->fd, nvf->node->maplength+1); // currently set to get a new map every time
 	}
 */
 	SANITYCHECK(nvf->node != NULL);
@@ -736,12 +736,12 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 //	if(nvf->node->maplength < nvf->node->length)
 //	{
 //		DEBUG("map was not already allocated (was %li).  Let's allocate one.\n", nvf->node->maplength);
-//		_nvp_extend_map(nvf->fd, nvf->node->length);
+//		_bankshot2_extend_map(nvf->fd, nvf->node->length);
 	
-		//if(_nvp_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
-		if(_nvp_extend_map(nvf->fd, MAX(1, nvf->node->length)))
+		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
+		if(_bankshot2_extend_map(nvf->fd, MAX(1, nvf->node->length)))
 		{
-			DEBUG("Failed to _nvp_extend_map, passing it up the chain\n");
+			DEBUG("Failed to _bankshot2_extend_map, passing it up the chain\n");
 			NVP_UNLOCK_NODE_WR(nvf);
 			NVP_UNLOCK_FD_WR(nvf);
 			return -1;
@@ -782,13 +782,13 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	return nvf->fd;
 }
 
-RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
+RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_nvp_CLOSE(%i)\n", file);
+	DEBUG("_bankshot2_CLOSE(%i)\n", file);
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 
 	//int iter;
 	NVP_LOCK_FD_WR(nvf);
@@ -797,9 +797,9 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 
 	nvf->valid = 0;
 
-	//_nvp_test_invalidate_node(nvf);
+	//_bankshot2_test_invalidate_node(nvf);
 
-	RETT_CLOSE result = _nvp_fileops->CLOSE(CALL_CLOSE);
+	RETT_CLOSE result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
 
 	NVP_UNLOCK_NODE_WR(nvf);
 	NVP_UNLOCK_FD_WR(nvf);
@@ -807,7 +807,7 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 	return result;
 }
 
-static ssize_t _nvp_check_read_size_valid(size_t count)
+static ssize_t _bankshot2_check_read_size_valid(size_t count)
 { 
 	if(count == 0)
 	{
@@ -824,7 +824,7 @@ static ssize_t _nvp_check_read_size_valid(size_t count)
 	return count;
 }
 
-static ssize_t _nvp_check_write_size_valid(size_t count)
+static ssize_t _bankshot2_check_write_size_valid(size_t count)
 {
 	if(count == 0)
 	{
@@ -842,15 +842,15 @@ static ssize_t _nvp_check_write_size_valid(size_t count)
 	return count;
 }
 
-RETT_READ _nvp_READ(INTF_READ)
+RETT_READ _bankshot2_READ(INTF_READ)
 {
-	DEBUG("_nvp_READ\n");
+	DEBUG("_bankshot2_READ\n");
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	
 	int cpuid = -1;
 
-	RETT_READ result = _nvp_check_read_size_valid(length);
+	RETT_READ result = _bankshot2_check_read_size_valid(length);
 	if (result <= 0)
 		return result;
 
@@ -859,7 +859,7 @@ RETT_READ _nvp_READ(INTF_READ)
 
 	NVP_LOCK_NODE_RD(nvf, cpuid);
 
-	result = _nvp_do_pread(CALL_READ, __sync_fetch_and_add(nvf->offset, length));
+	result = _bankshot2_do_pread(CALL_READ, __sync_fetch_and_add(nvf->offset, length));
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	
@@ -867,11 +867,11 @@ RETT_READ _nvp_READ(INTF_READ)
 		DEBUG("PREAD succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
 	}
 	else if (result <= 0){
-		DEBUG("_nvp_READ: PREAD failed; not changing offset. (returned %i)\n", result);
+		DEBUG("_bankshot2_READ: PREAD failed; not changing offset. (returned %i)\n", result);
 		// assert(0); // TODO: this is for testing only
 		__sync_fetch_and_sub(nvf->offset, length);
 	} else {
-		DEBUG("_nvp_READ: PREAD failed; Not fully read. (returned %i)\n", result);
+		DEBUG("_bankshot2_READ: PREAD failed; Not fully read. (returned %i)\n", result);
 		// assert(0); // TODO: this is for testing only
 		__sync_fetch_and_sub(nvf->offset, length - result);
 	}
@@ -881,15 +881,15 @@ RETT_READ _nvp_READ(INTF_READ)
 	return result;
 }
 
-RETT_WRITE _nvp_WRITE(INTF_WRITE)
+RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 {
-	DEBUG("_nvp_WRITE\n");
+	DEBUG("_bankshot2_WRITE\n");
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 
 	//int iter;
 	int cpuid = -1;
-	RETT_WRITE result = _nvp_check_write_size_valid(length);
+	RETT_WRITE result = _bankshot2_check_write_size_valid(length);
 	if (result <= 0)
 		return result;
 
@@ -897,7 +897,7 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid); //TODO
 
-	result = _nvp_do_pwrite(CALL_WRITE, __sync_fetch_and_add(nvf->offset, length));
+	result = _bankshot2_do_pwrite(CALL_WRITE, __sync_fetch_and_add(nvf->offset, length));
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 
@@ -906,8 +906,8 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 		if(nvf->append)
 		{
 			size_t temp_offset = __sync_fetch_and_add(nvf->offset, 0);
-			DEBUG("PWRITE succeeded and append == true.  Setting offset to end...\n"); 
-			assert(_nvp_do_seek64(nvf->fd, 0, SEEK_END) != (RETT_SEEK64)-1);
+			ERROR("PWRITE succeeded and append == true.  Setting offset to end...\n"); 
+			assert(_bankshot2_do_seek64(nvf->fd, 0, SEEK_END) != (RETT_SEEK64)-1);
 			DEBUG("PWRITE: offset changed from %li to %li\n", temp_offset, *nvf->offset);
 			temp_offset = 4; // touch temp_offset
 		}
@@ -918,11 +918,11 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 		}
 	}
 	else {
-		DEBUG("_nvp_WRITE: PWRITE failed; not changing offset. (returned %i)\n", result);
+		DEBUG("_bankshot2_WRITE: PWRITE failed; not changing offset. (returned %i)\n", result);
 		// assert(0); // TODO: this is for testing only
 	}
 
-	DEBUG("About to return from _nvp_WRITE with ret val %i (errno %i).  file len: %li, file off: %li, map len: %li\n", result, errno, nvf->node->length, nvf->offset, nvf->node->maplength);
+	DEBUG("About to return from _bankshot2_WRITE with ret val %i (errno %i).  file len: %li, file off: %li, map len: %li\n", result, errno, nvf->node->length, nvf->offset, nvf->node->maplength);
 
 	DO_MSYNC(nvf);
 
@@ -931,15 +931,15 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 	return result;
 }
 
-RETT_PREAD _nvp_PREAD(INTF_PREAD)
+RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_nvp_PREAD\n");
+	DEBUG("_bankshot2_PREAD\n");
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 
-	RETT_PREAD result = _nvp_check_read_size_valid(count);
+	RETT_PREAD result = _bankshot2_check_read_size_valid(count);
 	if (result <= 0)
 		return result;
 
@@ -948,7 +948,7 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 	NVP_CHECK_NVF_VALID(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid);
 
-	result = _nvp_do_pread(CALL_PREAD);
+	result = _bankshot2_do_pread(CALL_PREAD);
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
@@ -956,15 +956,15 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 	return result;
 }
 
-RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
+RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_nvp_PWRITE\n");
+	DEBUG("_bankshot2_PWRITE\n");
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	
-	RETT_PWRITE result = _nvp_check_write_size_valid(count);
+	RETT_PWRITE result = _bankshot2_check_write_size_valid(count);
 	if (result <= 0)
 		return result;
 	
@@ -980,12 +980,12 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 		NVP_LOCK_NODE_WR(nvf);
 		
-		result = _nvp_do_pwrite(CALL_PWRITE);
+		result = _bankshot2_do_pwrite(CALL_PWRITE);
 
 		NVP_UNLOCK_NODE_WR(nvf);
 	}
 	else {
-		result = _nvp_do_pwrite(CALL_PWRITE);
+		result = _bankshot2_do_pwrite(CALL_PWRITE);
 		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	}
 
@@ -994,9 +994,9 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 	return result;
 }
 
-RETT_PREAD _nvp_do_pread(INTF_PREAD)
+RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 {
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
 
 	ssize_t available_length = (nvf->node->length) - offset;
@@ -1053,7 +1053,7 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD)
 
 	if(UNLIKELY(intersects))
 	{
-		DEBUG("Buffer intersects with map (buffer %p map %p)\n", buf, nvf->node->data);
+		ERROR("Buffer intersects with map (buffer %p map %p)\n", buf, nvf->node->data);
 		assert(0);
 		return -1;
 	}
@@ -1113,17 +1113,17 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD)
 }
 
 
-RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
+RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_nvp_do_pwrite\n");
+	DEBUG("_bankshot2_do_pwrite\n");
 
 	#if COUNT_EXTENDS
-	_nvp_wr_total++;
+	_bankshot2_wr_total++;
 	#endif
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
 	
 	if(UNLIKELY(!nvf->canWrite)) {
@@ -1164,7 +1164,7 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 
 	if(UNLIKELY(intersects))
 	{
-		DEBUG("Buffer intersects with map (buffer %p len %p, map %p to %p)\n", buf, count, nvf->node->data, nvf->node->data-nvf->node->maplength);
+		ERROR("Buffer intersects with map (buffer %p len %p, map %p to %p)\n", buf, count, nvf->node->data, nvf->node->data-nvf->node->maplength);
 		assert(0);
 		return -1;
 	}
@@ -1182,7 +1182,7 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 	if(extension > 0)
 	{
 		#if COUNT_EXTENDS
-		_nvp_wr_extended++;
+		_bankshot2_wr_extended++;
 		#endif
 
 		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
@@ -1191,7 +1191,7 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 		if( offset+count >= nvf->node->maplength )
 		{
 			DEBUG("Request will also extend map; doing that before extending file.\n");
-			_nvp_extend_map(file, offset+count );
+			_bankshot2_extend_map(file, offset+count );
 		} else {
 			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->maplength, offset+count);
 			SANITYCHECK(nvf->node->maplength > (offset+count));
@@ -1203,11 +1203,11 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 
 		ssize_t temp_result;
 		if(nvf->aligned) {
-			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _nvp_fileops->name, nvf->fd, _nvp_zbuf, 512, count+offset-512);
-			temp_result = _nvp_fileops->PWRITE(nvf->fd, _nvp_zbuf, 512, count + offset - 512);
+			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _bankshot2_fileops->name, nvf->fd, _bankshot2_zbuf, 512, count+offset-512);
+			temp_result = _bankshot2_fileops->PWRITE(nvf->fd, _bankshot2_zbuf, 512, count + offset - 512);
 		} else {
 			DEBUG_P("(unaligned)\n");
-			temp_result = _nvp_fileops->PWRITE(nvf->fd, "\0", 1, count + offset - 1);
+			temp_result = _bankshot2_fileops->PWRITE(nvf->fd, "\0", 1, count + offset - 1);
 		}	
 
 		if(temp_result != ((nvf->aligned)?512:1))
@@ -1257,33 +1257,33 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 
 	//nvf->offset += count; // NOT IN PWRITE (this happens in write)
 
-	DEBUG("About to return from _nvp_PWRITE with ret val %li.  file len: %li, file off: %li, map len: %li, node %p\n", count, nvf->node->length, nvf->offset, nvf->node->maplength, nvf->node);
+	DEBUG("About to return from _bankshot2_PWRITE with ret val %li.  file len: %li, file off: %li, map len: %li, node %p\n", count, nvf->node->length, nvf->offset, nvf->node->maplength, nvf->node);
 
 	DO_MSYNC(nvf);
 
 	return count;
 }
 
-RETT_SEEK _nvp_SEEK(INTF_SEEK)
+RETT_SEEK _bankshot2_SEEK(INTF_SEEK)
 {
-	DEBUG("_nvp_SEEK\n");
-	return _nvp_SEEK64(CALL_SEEK);
+	DEBUG("_bankshot2_SEEK\n");
+	return _bankshot2_SEEK64(CALL_SEEK);
 }
 
-RETT_SEEK64 _nvp_SEEK64(INTF_SEEK64)
+RETT_SEEK64 _bankshot2_SEEK64(INTF_SEEK64)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_nvp_SEEK64\n");
+	DEBUG("_bankshot2_SEEK64\n");
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	
 	int cpuid = -1;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid);
 
-	RETT_SEEK64 result =  _nvp_do_seek64(CALL_SEEK64);	
+	RETT_SEEK64 result =  _bankshot2_do_seek64(CALL_SEEK64);	
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_WR(nvf);
@@ -1291,15 +1291,15 @@ RETT_SEEK64 _nvp_SEEK64(INTF_SEEK64)
 	return result;
 }
 
-RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64)
+RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_nvp_do_seek64\n");
+	DEBUG("_bankshot2_do_seek64\n");
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	
-	DEBUG("_nvp_do_seek64: file len %li, map len %li, current offset %li, requested offset %li with whence %li\n", 
+	DEBUG("_bankshot2_do_seek64: file len %li, map len %li, current offset %li, requested offset %li with whence %li\n", 
 		nvf->node->length, nvf->node->maplength, *nvf->offset, offset, whence);
 
 	switch(whence)
@@ -1344,22 +1344,22 @@ RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64)
 	return -1;
 }
 
-RETT_TRUNC _nvp_TRUNC(INTF_TRUNC)
+RETT_TRUNC _bankshot2_TRUNC(INTF_TRUNC)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_nvp_TRUNC\n");
+	DEBUG("_bankshot2_TRUNC\n");
 
-	return _nvp_TRUNC64(CALL_TRUNC);
+	return _bankshot2_TRUNC64(CALL_TRUNC);
 }
 
-RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
+RETT_TRUNC64 _bankshot2_TRUNC64(INTF_TRUNC64)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_nvp_TRUNC64\n");
+	DEBUG("_bankshot2_TRUNC64\n");
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 
 	int cpuid = -1;
 	NVP_LOCK_FD_RD(nvf, cpuid);
@@ -1377,7 +1377,7 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 
 	if(length == nvf->node->length)
 	{
-		DEBUG("_nvp_TRUNC64: requested length was the same as old length (%li).\n",
+		DEBUG("_bankshot2_TRUNC64: requested length was the same as old length (%li).\n",
 			nvf->node->length);
 		NVP_UNLOCK_NODE_WR(nvf);
 		NVP_UNLOCK_FD_RD(nvf, cpuid);
@@ -1388,11 +1388,11 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 
 	assert(!munmap(nvf->node->data, nvf->node->maplength));
 
-	int result = _nvp_fileops->TRUNC64(CALL_TRUNC64);
+	int result = _bankshot2_fileops->TRUNC64(CALL_TRUNC64);
 
 	if(result != 0)
 	{
-		ERROR("%s->TRUNC64 failed (returned %li, requested %li): %s\n", _nvp_fileops->name, result, length, strerror(errno));
+		ERROR("%s->TRUNC64 failed (returned %li, requested %li): %s\n", _bankshot2_fileops->name, result, length, strerror(errno));
 		assert(0);
 	}
 
@@ -1407,7 +1407,7 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 
 	DEBUG("Done with trunc, we better update map!\n");
 
-	_nvp_extend_map(nvf->fd, length);
+	_bankshot2_extend_map(nvf->fd, length);
 
 	nvf->node->length = length;
 
@@ -1419,11 +1419,11 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 	return result;
 }
 
-RETT_READV _nvp_READV(INTF_READV)
+RETT_READV _bankshot2_READV(INTF_READV)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("CALL: _nvp_READV\n");
+	DEBUG("CALL: _bankshot2_READV\n");
 
 	//TODO: opportunities for optimization exist here
 
@@ -1432,23 +1432,23 @@ RETT_READV _nvp_READV(INTF_READV)
 	int i;
 	for(i=0; i<iovcnt; i++)
 	{
-		fail |= _nvp_READ(file, iov[i].iov_base, iov[i].iov_len);
+		fail |= _bankshot2_READ(file, iov[i].iov_base, iov[i].iov_len);
 		if(fail) { break; }
 	}
 
 	if(fail != 0) {
-		DEBUG("_nvp_READV failed on iov %i\n", i);
+		DEBUG("_bankshot2_READV failed on iov %i\n", i);
 		return -1;
 	}
 
 	return 0;
 }
 
-RETT_WRITEV _nvp_WRITEV(INTF_WRITEV)
+RETT_WRITEV _bankshot2_WRITEV(INTF_WRITEV)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("CALL: _nvp_WRITEV\n");
+	DEBUG("CALL: _bankshot2_WRITEV\n");
 
 	//TODO: opportunities for optimization exist here
 
@@ -1457,46 +1457,46 @@ RETT_WRITEV _nvp_WRITEV(INTF_WRITEV)
 	int i;
 	for(i=0; i<iovcnt; i++)
 	{
-		fail |= _nvp_WRITE(file, iov[i].iov_base, iov[i].iov_len);
+		fail |= _bankshot2_WRITE(file, iov[i].iov_base, iov[i].iov_len);
 		if(fail) { break; }
 	}
 
 	if(fail != 0) {
-		DEBUG("_nvp_WRITEV failed on iov %i\n", i);
+		DEBUG("_bankshot2_WRITEV failed on iov %i\n", i);
 		return -1;
 	}
 
 	return 0;
 }
 
-RETT_DUP _nvp_DUP(INTF_DUP)
+RETT_DUP _bankshot2_DUP(INTF_DUP)
 {
-	DEBUG("_nvp_DUP(" PFFS_DUP ")\n", CALL_DUP);
+	DEBUG("_bankshot2_DUP(" PFFS_DUP ")\n", CALL_DUP);
 
-	//CHECK_RESOLVE_FILEOPS(_nvp_);
+	//CHECK_RESOLVE_FILEOPS(_bankshot2_);
 	if(file<0) {
-		return _nvp_fileops->DUP(CALL_DUP);
+		return _bankshot2_fileops->DUP(CALL_DUP);
 	}
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	
 	//int iter;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);	
 	NVP_LOCK_NODE_WR(nvf); // TODO
 
-	int result = _nvp_fileops->DUP(CALL_DUP);
+	int result = _bankshot2_fileops->DUP(CALL_DUP);
 
 	if(result < 0) 
 	{
-		DEBUG("Call to _nvp_DUP->%s->DUP failed: %s\n",
-			_nvp_fileops->name, strerror(errno));
+		DEBUG("Call to _bankshot2_DUP->%s->DUP failed: %s\n",
+			_bankshot2_fileops->name, strerror(errno));
 		NVP_UNLOCK_NODE_WR(nvf);
 		NVP_UNLOCK_FD_WR(nvf);
 		return result;
 	}
 
-	struct NVFile* nvf2 = &_nvp_fd_lookup[result];
+	struct NVFile* nvf2 = &_bankshot2_fd_lookup[result];
 
 	NVP_LOCK_FD_WR(nvf2);
 	
@@ -1532,13 +1532,13 @@ RETT_DUP _nvp_DUP(INTF_DUP)
 	return nvf2->fd;
 }
 
-RETT_DUP2 _nvp_DUP2(INTF_DUP2)
+RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 {
-	//CHECK_RESOLVE_FILEOPS(_nvp_);
-	DEBUG("_nvp_DUP2(" PFFS_DUP2 ")\n", CALL_DUP2);
+	//CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	DEBUG("_bankshot2_DUP2(" PFFS_DUP2 ")\n", CALL_DUP2);
 	
 	if(file<0) {
-		return _nvp_fileops->DUP(CALL_DUP);
+		return _bankshot2_fileops->DUP(CALL_DUP);
 	}
 
 	if(fd2<0) {
@@ -1553,8 +1553,8 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 		return file;
 	}
 
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
-	struct NVFile* nvf2 = &_nvp_fd_lookup[fd2];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	struct NVFile* nvf2 = &_bankshot2_fd_lookup[fd2];
 
 	//int iter;
 
@@ -1586,11 +1586,11 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 		}
 	}
 
-	int result = _nvp_fileops->DUP2(CALL_DUP2);
+	int result = _bankshot2_fileops->DUP2(CALL_DUP2);
 
 	if(result < 0)
 	{
-		DEBUG("_nvp_DUP2 failed to %s->DUP2(%i, %i) (returned %i): %s\n", _nvp_fileops->name, file, fd2, result, strerror(errno));
+		DEBUG("_bankshot2_DUP2 failed to %s->DUP2(%i, %i) (returned %i): %s\n", _bankshot2_fileops->name, file, fd2, result, strerror(errno));
 		NVP_UNLOCK_NODE_WR(nvf);
 		if(nvf->node != nvf2->node) { NVP_UNLOCK_NODE_WR(nvf2); }
 		NVP_UNLOCK_FD_WR(nvf);
@@ -1606,23 +1606,23 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 	
 	if(nvf->node != nvf2->node) { NVP_UNLOCK_NODE_WR(nvf2); }
 
-	_nvp_test_invalidate_node(nvf2);
+	_bankshot2_test_invalidate_node(nvf2);
 
 	if(result != fd2)
 	{
-		WARNING("result of _nvp_DUP2(%i, %i) didn't return the fd2 that was just closed.  Technically this doesn't violate POSIX, but I DON'T LIKE IT.  (Got %i, expected %i)\n",
+		WARNING("result of _bankshot2_DUP2(%i, %i) didn't return the fd2 that was just closed.  Technically this doesn't violate POSIX, but I DON'T LIKE IT.  (Got %i, expected %i)\n",
 			file, fd2, result, fd2);
 		assert(0);
 
 		NVP_UNLOCK_FD_WR(nvf2);
 
-		nvf2 = &_nvp_fd_lookup[result];
+		nvf2 = &_bankshot2_fd_lookup[result];
 
 		NVP_LOCK_FD_WR(nvf2);
 
 		if(nvf2->valid)
 		{
-			DEBUG("%s->DUP2 returned a result which corresponds to an already open NVFile! dup2(%i, %i) returned %i\n", _nvp_fileops->name, file, fd2, result);
+			ERROR("%s->DUP2 returned a result which corresponds to an already open NVFile! dup2(%i, %i) returned %i\n", _bankshot2_fileops->name, file, fd2, result);
 			assert(0);
 		}
 	}
@@ -1655,26 +1655,26 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 }
 
 
-RETT_IOCTL _nvp_IOCTL(INTF_IOCTL)
+RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL)
 {
-	CHECK_RESOLVE_FILEOPS(_nvp_);
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("CALL: _nvp_IOCTL\n");
+	DEBUG("CALL: _bankshot2_IOCTL\n");
 
 	va_list arg;
 	va_start(arg, request);
 	int* third = va_arg(arg, int*);
 
-	RETT_IOCTL result = _nvp_fileops->IOCTL(file, request, third);
+	RETT_IOCTL result = _bankshot2_fileops->IOCTL(file, request, third);
 
 	return result;
 }
 
 #define TIME_EXTEND 0
 
-int _nvp_extend_map(int file, size_t newcharlen)
+int _bankshot2_extend_map(int file, size_t newcharlen)
 {
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 
 	size_t newmaplen = (newcharlen/MMAP_PAGE_SIZE + 1)*MMAP_PAGE_SIZE;
 	
@@ -1696,11 +1696,11 @@ int _nvp_extend_map(int file, size_t newcharlen)
 
 	if(newmaplen < nvf->node->maplength)
 	{
-		DEBUG("Just kidding, _nvp_extend_map is actually going to SHRINK the map from %li to %li\n", nvf->node->maplength, newmaplen);
+		DEBUG("Just kidding, _bankshot2_extend_map is actually going to SHRINK the map from %li to %li\n", nvf->node->maplength, newmaplen);
 	}
 	else
 	{
-		DEBUG("_nvp_extend_map increasing map length from %li to %li\n", nvf->node->maplength, newmaplen);
+		DEBUG("_bankshot2_extend_map increasing map length from %li to %li\n", nvf->node->maplength, newmaplen);
 	}
 
 /*	// munmap first
@@ -1728,21 +1728,21 @@ int _nvp_extend_map(int file, size_t newcharlen)
 		int i;
 		for(i=0; i<OPEN_MAX; i++)
 		{
-			if( (_nvp_fd_lookup[i].valid) && (nvf->node==_nvp_fd_lookup[i].node) )
+			if( (_bankshot2_fd_lookup[i].valid) && (nvf->node==_bankshot2_fd_lookup[i].node) )
 			{
-				if( (!FLAGS_INCLUDE(max_perms, PROT_READ)) && (_nvp_fd_lookup[i].canRead) )
+				if( (!FLAGS_INCLUDE(max_perms, PROT_READ)) && (_bankshot2_fd_lookup[i].canRead) )
 				{
 					DEBUG("FD %i is adding read perms and is the new fd_with_max_perms (was %i, called with %i)\n", i, fd_with_max_perms, file);
 					max_perms = PROT_READ;
 					fd_with_max_perms = i;
 				}
-				if( (!FLAGS_INCLUDE(max_perms, PROT_WRITE)) && (_nvp_fd_lookup[i].canWrite) )
+				if( (!FLAGS_INCLUDE(max_perms, PROT_WRITE)) && (_bankshot2_fd_lookup[i].canWrite) )
 				{
 					DEBUG("FD %i is adding write perms and is the new fd_with_max_perms, but may include O_APPEND (was %i, called with %i)\n", i, fd_with_max_perms, file);
 					max_perms = PROT_READ|PROT_WRITE;
 					fd_with_max_perms = i;
 				}
-				if( (_nvp_fd_lookup[i].canWrite) && (!_nvp_fd_lookup[i].append) )
+				if( (_bankshot2_fd_lookup[i].canWrite) && (!_bankshot2_fd_lookup[i].append) )
 				{
 					DEBUG("FD %i is adding write perms and is the new fd_with_max_perms (was %i, called with %i)\n", i, fd_with_max_perms, file);
 					fd_with_max_perms = i;
@@ -1752,7 +1752,7 @@ int _nvp_extend_map(int file, size_t newcharlen)
 		}
 	}
 
-	DEBUG("FD with max perms %i has read? %s   has write? %s\n", fd_with_max_perms, (_nvp_fd_lookup[fd_with_max_perms].canRead)?"yes":"no", (_nvp_fd_lookup[fd_with_max_perms].canWrite)?"yes":"no");
+	DEBUG("FD with max perms %i has read? %s   has write? %s\n", fd_with_max_perms, (_bankshot2_fd_lookup[fd_with_max_perms].canRead)?"yes":"no", (_bankshot2_fd_lookup[fd_with_max_perms].canWrite)?"yes":"no");
 
 	SANITYCHECK(FLAGS_INCLUDE(max_perms, PROT_READ));
 /*
@@ -1835,7 +1835,7 @@ int _nvp_extend_map(int file, size_t newcharlen)
 	uint64_t j;
 	for(j=0; j<newcharlen; j+=4096)
 	{
-		//_nvp_fileops->PREAD(nvf->fd, temp_rd_buf, 4096, j);
+		//_bankshot2_fileops->PREAD(nvf->fd, temp_rd_buf, 4096, j);
 	//	if(!(j%0x80000000)) {
 		//	DEBUG("Reading from base %p offset %p (address %p), going from 0x0 to %p\n", nvf->node->data, j, nvf->node->data+j, newcharlen);
 		//	DEBUG("distance from end of file: %li (%li MB)\n", (((int64_t)newcharlen) - ((int64_t)j)), (((int64_t)newcharlen) - ((int64_t)j))/1024/1024 );
@@ -1860,7 +1860,7 @@ int _nvp_extend_map(int file, size_t newcharlen)
 	return 0;
 }
 
-void _nvp_test_invalidate_node(struct NVFile* nvf)
+void _bankshot2_test_invalidate_node(struct NVFile* nvf)
 {
 	struct NVNode* node = nvf->node;
 
@@ -1875,7 +1875,7 @@ void _nvp_test_invalidate_node(struct NVFile* nvf)
 	int i;
 	for(i=0; i<OPEN_MAX; i++)
 	{
-		if( (_nvp_fd_lookup[i].valid) && (node==_nvp_fd_lookup[i].node) )
+		if( (_bankshot2_fd_lookup[i].valid) && (node==_bankshot2_fd_lookup[i].node) )
 		{
 			do_munmap = 0;
 			break;
@@ -1906,13 +1906,13 @@ void _nvp_test_invalidate_node(struct NVFile* nvf)
 	}
 }
 
-void _nvp_SIGBUS_handler(int sig)
+void _bankshot2_SIGBUS_handler(int sig)
 {
 	ERROR("We got a SIGBUS (sig %i)!  This almost certainly means someone tried to access an area inside an mmaped region but past the length of the mmapped file.\n", sig);
 	#if MANUAL_PREFAULT
 	ERROR("   OR if this happened during prefault, we probably just tried to prefault a hole in the file, which isn't going to work.\n");
 	#endif
-//	_nvp_debug_handoff();
+//	_bankshot2_debug_handoff();
 	assert(0);
 }
 

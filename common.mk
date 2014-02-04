@@ -70,7 +70,7 @@ TESTS = test_tester_fail.result test_tester_success.result helloworld.result nvm
 
 #SOFILES = fileops_hub.so nvmfileops.so fileops_compareharness.so wrapops.so fileops_filter.so moneta.so fileops_sem.so fileops_death.so
 #NVP_SOFILES = libnvp.so fileops_nvm.so fileops_compareharness.so fileops_wrap.so fileops_filter.so fileops_sem.so fileops_death.so
-NVP_SOFILES = libnvp.so libfileops_wrap.so libfileops_filter.so libfileops_sem.so libfileops_count.so libfileops_harness.so libfileops_nvp.so libfileops_perfcount.so libfileops_hackmmap.so libfileops_death.so
+NVP_SOFILES = libnvp.so libfileops_wrap.so libfileops_filter.so libfileops_sem.so libfileops_count.so libfileops_harness.so libfileops_nvp.so libfileops_perfcount.so libfileops_hackmmap.so libfileops_death.so libfileops_bankshot2.so
 #MONETA_SOFILES = libfileops_moneta.so libmoneta.so
 #SDSSD_SOFILES = libfileops_sdssd.so
 #BANKSHOT_SOFILES = libfileops_sdssdbs.so
