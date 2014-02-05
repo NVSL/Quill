@@ -84,6 +84,9 @@ test1:
 	gcc mytest.c -o mytest
 	export LD_LIBRARY_PATH=$(MY_LD_LIB_PATH); export LD_PRELOAD="libnvp.so"; export NVP_TREE_FILE="nvp_wrap.tree"; ./mytest
 
+# A simpler way is to use the run_quill.sh script:
+	gcc mytest.c -o mytest
+	./run_quill.sh -p </path/to/quill> -t <tree_name> ./mytest
 
 
 How to add a new module
