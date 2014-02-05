@@ -50,8 +50,8 @@ memcpy.o: memcpy.c
 
 clean:
 	$(MAKE) -C test clean
-	- $(MAKE) -C $(MONETA_MOUNT_DIR)/test clean
-	- $(MAKE) -C $(LOCAL_TEST_DIR)/test clean
+#	- $(MAKE) -C $(MONETA_MOUNT_DIR)/test clean
+#	- $(MAKE) -C $(LOCAL_TEST_DIR)/test clean
 	#rm -rf /mnt/beecube/*
 	rm -f *.o *.i *.ci *.so xdd_result_*.txt $(BDB_TESTS) $(OLTP_TESTS) logs/*.result iogen simplecat
 
