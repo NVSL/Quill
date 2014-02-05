@@ -25,6 +25,7 @@ struct timezone;
 struct timeval;
 int gettimeofday(struct timeval *tv, struct timezone *tz);
 
+char *cache_path;
 
 #define NOSANITYCHECK 1
 #if NOSANITYCHECK
@@ -404,6 +405,12 @@ void _bankshot2_init2(void)
 	atexit(report_memcpy_usec);
 	#endif
 
+	cache_path = getenv("CACHE_PATH");	
+	if (!cache_path) {
+		ERROR("Invalid cache path.\n");
+		assert(0);
+	}
+
 	_bankshot2_write_pwrite_lock_handoff = 0;
 
 	assert(!posix_memalign(((void**)&_bankshot2_zbuf), 4096, 4096));
@@ -452,14 +459,18 @@ void _bankshot2_print_extend_stats(void)
 
 RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 {
+	char *path_to_cachefile;
+	char *filename;
+	int size = strlen(cache_path);
+
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
 	if(path==NULL) {
-		DEBUG("Invalid path.\n");
+		ERROR("Invalid path.\n");
 		errno = EINVAL;
 		return -1;
 	}
-	
+
 	DEBUG("_bankshot2_OPEN(%s)\n", path);
 	
 	DEBUG("Attempting to _bankshot2_OPEN the file \"%s\" with the following flags (0x%X): ", path, oflag);
@@ -731,6 +742,29 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	SANITYCHECK(nvf->node->length == file_st.st_size);
 
 	DEBUG("Meh, why not allocate a new map every time\n");
+
+	filename = basename(path);
+	path_to_cachefile = malloc(size + strlen(filename) + 2);
+	if (!path_to_cachefile)
+	{
+		DEBUG("Failed to allocate cache file name\n");
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_UNLOCK_FD_WR(nvf);
+		return -1;
+	}
+
+	strcpy(path_to_cachefile, cache_path);
+	if (path_to_cachefile[size - 1] == '/') {
+		strcpy(path_to_cachefile + size, filename);
+		path_to_cachefile[size + strlen(filename)] = '\0';
+	} else {
+		path_to_cachefile[size] = '/';
+		strcpy(path_to_cachefile + size + 1, filename);
+		path_to_cachefile[size + strlen(filename) + 1] = '\0';
+	}
+
+	ERROR("filename: %s\n", path_to_cachefile);
+
 	//nvf->node->maplength = -1;
 
 //	if(nvf->node->maplength < nvf->node->length)
@@ -744,6 +778,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 			DEBUG("Failed to _bankshot2_extend_map, passing it up the chain\n");
 			NVP_UNLOCK_NODE_WR(nvf);
 			NVP_UNLOCK_FD_WR(nvf);
+			free(path_to_cachefile);
 			return -1;
 		}
 
@@ -779,6 +814,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	NVP_UNLOCK_FD_WR(nvf);
 
 	errno = 0;
+	free(path_to_cachefile);
 	return nvf->fd;
 }
 
