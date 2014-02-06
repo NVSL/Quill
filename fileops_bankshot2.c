@@ -457,11 +457,37 @@ void _bankshot2_print_extend_stats(void)
 }
 #endif
 
-RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
+static char* _bankshot2_get_cachefile_path(const char *path)
 {
 	char *path_to_cachefile;
 	char *filename;
 	int size = strlen(cache_path);
+
+	filename = basename(path);
+	path_to_cachefile = malloc(size + strlen(filename) + 2);
+	if (!path_to_cachefile)
+	{
+		DEBUG("Failed to allocate cache file name\n");
+		assert(0);
+	}
+
+	strcpy(path_to_cachefile, cache_path);
+	if (path_to_cachefile[size - 1] == '/') {
+		strcpy(path_to_cachefile + size, filename);
+		path_to_cachefile[size + strlen(filename)] = '\0';
+	} else {
+		path_to_cachefile[size] = '/';
+		strcpy(path_to_cachefile + size + 1, filename);
+		path_to_cachefile[size + strlen(filename) + 1] = '\0';
+	}
+
+	return path_to_cachefile;
+}
+
+
+RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
+{
+	char *path_to_cachefile;
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
@@ -743,26 +769,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 
 	DEBUG("Meh, why not allocate a new map every time\n");
 
-	filename = basename(path);
-	path_to_cachefile = malloc(size + strlen(filename) + 2);
-	if (!path_to_cachefile)
-	{
-		DEBUG("Failed to allocate cache file name\n");
-		NVP_UNLOCK_NODE_WR(nvf);
-		NVP_UNLOCK_FD_WR(nvf);
-		return -1;
-	}
-
-	strcpy(path_to_cachefile, cache_path);
-	if (path_to_cachefile[size - 1] == '/') {
-		strcpy(path_to_cachefile + size, filename);
-		path_to_cachefile[size + strlen(filename)] = '\0';
-	} else {
-		path_to_cachefile[size] = '/';
-		strcpy(path_to_cachefile + size + 1, filename);
-		path_to_cachefile[size + strlen(filename) + 1] = '\0';
-	}
-
+	path_to_cachefile = _bankshot2_get_cachefile_path(path);
 	ERROR("filename: %s\n", path_to_cachefile);
 
 	//nvf->node->maplength = -1;
