@@ -68,31 +68,31 @@ static inline int _nvp_get_cpuid(void)
 	if (cpuid == -1) \
 		cpuid = GET_CPUID(); \
 	SANITY(cpuid<(NVP_NUM_LOCKS/2)); \
-	DEBUG("NVP_RDLOCK requested on CPU %i\n", cpuid); \
+	DEBUG("NVP_RDLOCK requested on CPU %i, lock %p\n", cpuid, &lock); \
 	NVP_LOCK_CHECK(pthread_rwlock_rdlock(&lock[cpuid*2])); \
-	DEBUG("NVP_RDLOCK acquired on CPU %i\n", cpuid)
+	DEBUG("NVP_RDLOCK acquired on CPU %i, lock %p\n", cpuid, &lock)
 
 #define NVP_LOCK_UNLOCK_RD(lock, cpuid) \
-	DEBUG("Releasing NVP_RDLOCK on CPU %i\n", cpuid); \
+	DEBUG("Releasing NVP_RDLOCK on CPU %i, lock %p\n", cpuid, &lock); \
 	SANITY(cpuid<(NVP_NUM_LOCKS/2)); \
 	NVP_LOCK_CHECK(pthread_rwlock_unlock(&lock[cpuid*2])); \
-	DEBUG("NVP_RDLOCK released on CPU %i\n", cpuid)
+	DEBUG("NVP_RDLOCK released on CPU %i, lock %p\n", cpuid, &lock)
 
 
 #define NVP_LOCK_WR(lock) { int iter; \
-	DEBUG("NVP_WRLOCK requested on cpu %i\n", GET_CPUID()); \
+	DEBUG("NVP_WRLOCK requested on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	for(iter=0; iter<NVP_NUM_LOCKS; iter+=2) { \
 		NVP_LOCK_CHECK(pthread_rwlock_wrlock(&lock[iter])); \
 	} \
-	DEBUG("NVP_WRLOCK acquired on cpu %i\n", GET_CPUID()); \
+	DEBUG("NVP_WRLOCK acquired on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	}
 
 #define NVP_LOCK_UNLOCK_WR(lock) { int iter; \
-	DEBUG("NVP_WRLOCK releasing on cpu %i\n", GET_CPUID()); \
+	DEBUG("NVP_WRLOCK releasing on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	for(iter=0; iter<NVP_NUM_LOCKS; iter+=2) { \
 		NVP_LOCK_CHECK(pthread_rwlock_unlock(&lock[iter])); \
 	} \
-	DEBUG("NVP_WRLOCK released on cpu %i\n", GET_CPUID()); \
+	DEBUG("NVP_WRLOCK released on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	}
 
 
@@ -117,33 +117,33 @@ static inline int _nvp_get_cpuid(void)
 	if (cpuid == -1) \
 		cpuid = GET_CPUID(); \
 	SANITY(cpuid<(NVP_NUM_LOCKS/2)); \
-	DEBUG("NVP_RDLOCK requested on CPU %i\n", cpuid); \
+	DEBUG("NVP_RDLOCK requested on CPU %i, lock %p\n", cpuid, &lock); \
 	while(__sync_fetch_and_add(&lock[cpuid * 2 * 16], 1) >= WR_HELD) \
 		__sync_fetch_and_sub(&lock[cpuid * 2 * 16], 1); \
-	DEBUG("NVP_RDLOCK acquired on CPU %i\n", cpuid)
+	DEBUG("NVP_RDLOCK acquired on CPU %i, lock %p\n", cpuid, &lock)
 
 #define NVP_LOCK_UNLOCK_RD(lock, cpuid) \
-	DEBUG("Releasing NVP_RDLOCK on CPU %i\n", cpuid); \
+	DEBUG("NVP_RDLOCK releasing on CPU %i, lock %p\n", cpuid, &lock); \
 	SANITY(cpuid<(NVP_NUM_LOCKS/2)); \
 	__sync_fetch_and_sub(&lock[cpuid * 2 * 16], 1); \
-	DEBUG("NVP_RDLOCK released on CPU %i\n", cpuid)
+	DEBUG("NVP_RDLOCK released on CPU %i, lock %p\n", cpuid, &lock)
 
 
 #define NVP_LOCK_WR(lock) { int iter; \
-	DEBUG("NVP_WRLOCK requested on cpu %i\n", GET_CPUID()); \
+	DEBUG("NVP_WRLOCK requested on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	for(iter=0; iter<NVP_NUM_LOCKS; iter+=2) { \
 		while(!__sync_bool_compare_and_swap(&lock[iter * 16], 0, WR_HELD)) \
 			; \
 	} \
-	DEBUG("NVP_WRLOCK acquired on cpu %i\n", GET_CPUID()); \
+	DEBUG("NVP_WRLOCK acquired on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	}
 
 #define NVP_LOCK_UNLOCK_WR(lock) { int iter; \
-	DEBUG("NVP_WRLOCK releasing on cpu %i\n", GET_CPUID()); \
+	DEBUG("NVP_WRLOCK releasing on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	for(iter=0; iter<NVP_NUM_LOCKS; iter+=2) { \
 		__sync_fetch_and_sub(&lock[iter * 16], WR_HELD); \
 	} \
-	DEBUG("NVP_WRLOCK released on cpu %i\n", GET_CPUID()); \
+	DEBUG("NVP_WRLOCK released on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	}
 
 

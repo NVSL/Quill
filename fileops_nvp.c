@@ -76,6 +76,7 @@ struct NVFile
 	bool aligned;
 	ino_t serialno; // duplicated so that iterating doesn't require following every node*
 	struct NVNode* node;
+	bool posix;
 };
 
 struct NVNode
@@ -679,10 +680,13 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		nvf->canRead = 1;
 		nvf->canWrite = 1;
 		#else
-		ERROR("mmap doesn't support O_WRONLY!  goodbye.\n");
-		assert(0);
+		DEBUG("mmap doesn't support O_WRONLY! Use posix instead.\n");
+		nvf->posix = 1;
 		nvf->canRead = 0;
 		nvf->canWrite = 1;
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_UNLOCK_FD_WR(nvf);
+		return nvf->fd;
 		#endif
 	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
 		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n", oflag, result);
@@ -790,6 +794,11 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
+	if (nvf->posix) {
+		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
+		return _nvp_fileops->CLOSE(CALL_CLOSE);
+	}
+
 	//int iter;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
@@ -844,10 +853,15 @@ static ssize_t _nvp_check_write_size_valid(size_t count)
 
 RETT_READ _nvp_READ(INTF_READ)
 {
-	DEBUG("_nvp_READ\n");
+	DEBUG("_nvp_READ %d\n", file);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	
+	if (nvf->posix) {
+		DEBUG("Call posix READ for fd %d\n", nvf->fd);
+		return _nvp_fileops->READ(CALL_READ);
+	}
+
 	int cpuid = -1;
 
 	RETT_READ result = _nvp_check_read_size_valid(length);
@@ -883,9 +897,14 @@ RETT_READ _nvp_READ(INTF_READ)
 
 RETT_WRITE _nvp_WRITE(INTF_WRITE)
 {
-	DEBUG("_nvp_WRITE\n");
+	DEBUG("_nvp_WRITE %d\n", file);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix WRITE for fd %d\n", nvf->fd);
+		return _nvp_fileops->WRITE(CALL_WRITE);
+	}
 
 	//int iter;
 	int cpuid = -1;
@@ -913,7 +932,7 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 		}
 		else
 		{
-			DEBUG("PWRITE succeeded: extending offset from %li to %li\n", *nvf->offset - offset, *nvf->offset);
+			DEBUG("PWRITE succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
 //			*nvf->offset += result;
 		}
 	}
@@ -935,9 +954,14 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
 
-	DEBUG("_nvp_PREAD\n");
+	DEBUG("_nvp_PREAD %d\n", file);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix PREAD for fd %d\n", nvf->fd);
+		return _nvp_fileops->PREAD(CALL_PREAD);
+	}
 
 	RETT_PREAD result = _nvp_check_read_size_valid(count);
 	if (result <= 0)
@@ -960,10 +984,15 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
 
-	DEBUG("_nvp_PWRITE\n");
+	DEBUG("_nvp_PWRITE %d\n", file);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
-	
+
+	if (nvf->posix) {
+		DEBUG("Call posix PWRITE for fd %d\n", nvf->fd);
+		return _nvp_fileops->PWRITE(CALL_PWRITE);
+	}
+
 	RETT_PWRITE result = _nvp_check_write_size_valid(count);
 	if (result <= 0)
 		return result;
@@ -1277,7 +1306,12 @@ RETT_SEEK64 _nvp_SEEK64(INTF_SEEK64)
 	DEBUG("_nvp_SEEK64\n");
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
-	
+
+	if (nvf->posix) {
+		DEBUG("Call posix SEEK64 for fd %d\n", nvf->fd);
+		return _nvp_fileops->SEEK64(CALL_SEEK64);
+	}
+
 	int cpuid = -1;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
@@ -1360,6 +1394,11 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 	DEBUG("_nvp_TRUNC64\n");
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix TRUNC64 for fd %d\n", nvf->fd);
+		return _nvp_fileops->TRUNC64(CALL_TRUNC64);
+	}
 
 	int cpuid = -1;
 	NVP_LOCK_FD_RD(nvf, cpuid);
@@ -1474,12 +1513,17 @@ RETT_DUP _nvp_DUP(INTF_DUP)
 	DEBUG("_nvp_DUP(" PFFS_DUP ")\n", CALL_DUP);
 
 	//CHECK_RESOLVE_FILEOPS(_nvp_);
-	if(file<0) {
+	if(file < 0) {
 		return _nvp_fileops->DUP(CALL_DUP);
 	}
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
-	
+	 
+	if (nvf->posix) {
+		DEBUG("Call posix DUP for fd %d\n", nvf->fd);
+		return _nvp_fileops->DUP(CALL_DUP);
+	}
+
 	//int iter;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);	
@@ -1556,6 +1600,11 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	struct NVFile* nvf2 = &_nvp_fd_lookup[fd2];
 
+	if (nvf->posix) {
+		DEBUG("Call posix DUP2 for fd %d\n", nvf->fd);
+		return _nvp_fileops->DUP2(CALL_DUP2);
+	}
+
 	//int iter;
 
 	if(file > fd2)
@@ -1570,11 +1619,11 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 	if( (!nvf->valid)||(!nvf2->valid) ) {
 		errno = EBADF;
 		DEBUG("Invalid FD1 %i or FD2 %i\n", file, fd2);
-		NVP_UNLOCK_FD_WR(nvf);
-		NVP_UNLOCK_FD_WR(nvf2);
+//		NVP_UNLOCK_FD_WR(nvf);
+//		NVP_UNLOCK_FD_WR(nvf2);
 	}
 
-	if(nvf->node == nvf2->node) {
+	if(nvf->node == nvf2->node || !nvf2->node) {
 		NVP_LOCK_NODE_WR(nvf);
 	} else {
 		if(nvf->node > nvf2->node) {
@@ -1604,7 +1653,7 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 
 	nvf2->valid = 0;
 	
-	if(nvf->node != nvf2->node) { NVP_UNLOCK_NODE_WR(nvf2); }
+	if(nvf2->node && nvf->node != nvf2->node) { NVP_UNLOCK_NODE_WR(nvf2); }
 
 	_nvp_test_invalidate_node(nvf2);
 
@@ -1806,9 +1855,9 @@ int _nvp_extend_map(int file, size_t newcharlen)
 
 	if( result == MAP_FAILED || result == NULL )
 	{
-		ERROR("mmap FAILED for fd %i: %s\n", nvf->fd, strerror(errno));
-		assert(0);
-		return -1;
+		DEBUG("mmap FAILED for fd %i: %s\n", nvf->fd, strerror(errno));
+		nvf->posix = 1;
+		return 0;
 	}
 
 	if( nvf->node->data != result )
