@@ -666,8 +666,9 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	nvf->fd = result;
 	
 	nvf->serialno = file_st.st_ino;
-	
-	
+
+	nvf->node = node;
+
 	// Set FD permissions
 	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
 		DEBUG("oflag (%i) specifies O_RDWR for fd %i\n", oflag, result);
@@ -704,8 +705,6 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	} else {
 		nvf->append = 0;
 	}
-
-	nvf->node = node;
 
 /*
 	nvf->node->maxPerms |= (nvf->canRead)?PROT_READ:0;
@@ -1519,11 +1518,6 @@ RETT_DUP _nvp_DUP(INTF_DUP)
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	 
-	if (nvf->posix) {
-		DEBUG("Call posix DUP for fd %d\n", nvf->fd);
-		return _nvp_fileops->DUP(CALL_DUP);
-	}
-
 	//int iter;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);	
@@ -1541,6 +1535,15 @@ RETT_DUP _nvp_DUP(INTF_DUP)
 	}
 
 	struct NVFile* nvf2 = &_nvp_fd_lookup[result];
+
+	if (nvf->posix) {
+		DEBUG("Call posix DUP for fd %d\n", nvf->fd);
+		nvf2->posix = nvf->posix;
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_UNLOCK_FD_WR(nvf);
+		return result;
+	}
+
 
 	NVP_LOCK_FD_WR(nvf2);
 	
@@ -1561,6 +1564,7 @@ RETT_DUP _nvp_DUP(INTF_DUP)
 	nvf2->aligned   = nvf->aligned;
 	nvf2->serialno 	= nvf->serialno;
 	nvf2->node 	= nvf->node;
+	nvf2->posix 	= nvf->posix;
 
 	SANITYCHECK(nvf2->node != NULL);
 
@@ -1602,6 +1606,7 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 
 	if (nvf->posix) {
 		DEBUG("Call posix DUP2 for fd %d\n", nvf->fd);
+		nvf2->posix = nvf->posix;
 		return _nvp_fileops->DUP2(CALL_DUP2);
 	}
 
@@ -1685,6 +1690,7 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 	nvf2->serialno = nvf->serialno;
 	nvf2->node = nvf->node;
 	nvf2->valid = nvf->valid;
+	nvf2->posix = nvf->posix;
 
 	SANITYCHECK(nvf2->node != NULL);
 	SANITYCHECK(nvf2->valid);
