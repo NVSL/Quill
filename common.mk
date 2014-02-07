@@ -51,7 +51,8 @@ COPTIMIZATIONS = -m64
 #-march=core2 -minline-all-stringops -m64 -fprefetch-loop-arrays
 #-mno-align-stringops
 
-CFLAGS = -DSHOW_DEBUG=$(LIBNVP_DEBUG) -DUSE_PTHREAD_LOCK=$(USE_PTHREAD_LOCK) -DUSE_SCHED_GETCPU=$(USE_SCHED_GETCPU) -DSPIN_ON_ERROR=$(LIBNVP_SPIN_ON_ERROR) -Wall -Wundef -pthread -fPIC  -g $(COPTIMIZATIONS) -D$(SYSTEM_TYPE) 
+CFLAGS = -DSHOW_DEBUG=$(LIBNVP_DEBUG) -DSPIN_ON_ERROR=$(LIBNVP_SPIN_ON_ERROR) -Wall -Wundef -pthread -fPIC  -g $(COPTIMIZATIONS) -D$(SYSTEM_TYPE) -DUSE_PTHREAD_LOCK=$(USE_PTHREAD_LOCK) -DUSE_SCHED_GETCPU=$(USE_SCHED_GETCPU)
+ 
 CXXFLAGS=$(CFLAGS)
 
 MARKERRORS = sed -e "s/\(ERROR:\)/$$(tput bold;tput setaf 1)\1$$(tput sgr0)/g" | sed -e "s/\(WARNING:\)/$$(tput bold;tput setaf 3)\1$$(tput sgr0)/g"
