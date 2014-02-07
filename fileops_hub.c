@@ -737,9 +737,7 @@ RETT_DUP2 _hub_DUP2(INTF_DUP2)
 		}
 		else
 		{
-			DEBUG("Not gonna deal with that, returning -1;\n");
-			errno = EBADF;
-			return -1;
+			DEBUG("This shall be allowed because we want to handle normal files with Posix operations.\n");
 		}
 	} else {
 		DEBUG("_hub_DUP2: fd1 (%i) and fd2 (%i) have the same handler (%s)\n", file, fd2,
