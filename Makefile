@@ -46,7 +46,7 @@ memcpy.o: memcpy.c
 #  Boring stuff  #
 
 clean:
-	$(MAKE) -C test clean
+#	$(MAKE) -C test clean
 #	- $(MAKE) -C $(MONETA_MOUNT_DIR)/test clean
 #	- $(MAKE) -C $(LOCAL_TEST_DIR)/test clean
 	#rm -rf /mnt/beecube/*
