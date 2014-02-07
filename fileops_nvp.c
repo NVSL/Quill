@@ -681,7 +681,8 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		nvf->canRead = 1;
 		nvf->canWrite = 1;
 		#else
-		DEBUG("mmap doesn't support O_WRONLY! Use posix instead.\n");
+		MSG("File %s is opened O_WRONLY.\n", path);
+		MSG("Does not support mmap, use posix instead.\n");
 		nvf->posix = 1;
 		nvf->canRead = 0;
 		nvf->canWrite = 1;
@@ -793,17 +794,16 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
-	if (nvf->posix) {
-		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
-		return _nvp_fileops->CLOSE(CALL_CLOSE);
-	}
-
 	//int iter;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_WR(nvf);
 
 	nvf->valid = 0;
+
+	if (nvf->posix) {
+		nvf->valid = 0;
+	}
 
 	//_nvp_test_invalidate_node(nvf);
 
@@ -1861,7 +1861,8 @@ int _nvp_extend_map(int file, size_t newcharlen)
 
 	if( result == MAP_FAILED || result == NULL )
 	{
-		DEBUG("mmap FAILED for fd %i: %s\n", nvf->fd, strerror(errno));
+		MSG("mmap failed for fd %i: %s\n", nvf->fd, strerror(errno));
+		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
 		nvf->posix = 1;
 		return 0;
 	}
