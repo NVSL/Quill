@@ -25,6 +25,9 @@ LOG_OUT_DIR=$(BEE3HOME)/test/PosixNVM/logs
 LIBNVP_DEBUG=0
 LIBNVP_SPIN_ON_ERROR=0
 
+USE_PTHREAD_LOCK=0
+USE_SCHED_GETCPU=1
+
 #MONETA_LIB_DIR=$(BEE3HOME)/Tools/BEE3/library/src$(MONETA_LIB_VERSION)/build/$(MONETA_LIB_BUILD)
 #SDSSD_LIB_DIR=${SDSSDHOME}/libs/sdssd/host/build/${SDSSD_LIB_BUILD}:${SDSSDHOME}/libs/io/host/build/${SDSSD_LIB_BUILD}
 NVP_LIB_DIR=$(BEE3HOME)/test/PosixNVM
@@ -48,7 +51,8 @@ COPTIMIZATIONS = -m64
 #-march=core2 -minline-all-stringops -m64 -fprefetch-loop-arrays
 #-mno-align-stringops
 
-CFLAGS = -DSHOW_DEBUG=$(LIBNVP_DEBUG) -DSPIN_ON_ERROR=$(LIBNVP_SPIN_ON_ERROR) -Wall -Wundef -pthread -fPIC  -g $(COPTIMIZATIONS) -D$(SYSTEM_TYPE) 
+CFLAGS = -DSHOW_DEBUG=$(LIBNVP_DEBUG) -DSPIN_ON_ERROR=$(LIBNVP_SPIN_ON_ERROR) -Wall -Wundef -pthread -fPIC  -g $(COPTIMIZATIONS) -D$(SYSTEM_TYPE) -DUSE_PTHREAD_LOCK=$(USE_PTHREAD_LOCK) -DUSE_SCHED_GETCPU=$(USE_SCHED_GETCPU)
+ 
 CXXFLAGS=$(CFLAGS)
 
 MARKERRORS = sed -e "s/\(ERROR:\)/$$(tput bold;tput setaf 1)\1$$(tput sgr0)/g" | sed -e "s/\(WARNING:\)/$$(tput bold;tput setaf 3)\1$$(tput sgr0)/g"
@@ -85,9 +89,5 @@ check_moneta_mounted:
 
 check_moneta:
 	if [ "`stat . | grep 'Device: fb00h' | wc -l`" == "0" ]; then echo "FAILURE: Current directory is NOT on a Moneta device!" | $(HIGHLIGHTFAILURE) ; exit 1; else echo "SUCCESS: Current directory is on a Moneta device." | $(HIGHLIGHTFAILURE); fi
-
-
-USE_PTHREAD_LOCK=0
-USE_SCHED_GETCPU=1
 
 
