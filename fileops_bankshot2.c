@@ -77,6 +77,7 @@ struct NVFile
 	bool aligned;
 	ino_t serialno; // duplicated so that iterating doesn't require following every node*
 	struct NVNode* node;
+	bool posix;
 };
 
 struct NVNode
@@ -405,7 +406,7 @@ void _bankshot2_init2(void)
 	atexit(report_memcpy_usec);
 	#endif
 
-	cache_path = getenv("CACHE_PATH");	
+	cache_path = getenv("CACHE_PATH");      
 	if (!cache_path) {
 		ERROR("Invalid cache path.\n");
 		assert(0);
@@ -492,11 +493,11 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
 	if(path==NULL) {
-		ERROR("Invalid path.\n");
+		DEBUG("Invalid path.\n");
 		errno = EINVAL;
 		return -1;
 	}
-
+	
 	DEBUG("_bankshot2_OPEN(%s)\n", path);
 	
 	DEBUG("Attempting to _bankshot2_OPEN the file \"%s\" with the following flags (0x%X): ", path, oflag);
@@ -560,7 +561,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		}
 		else
 		{
-			ERROR("File at path %s is NOT a regular file!  INCONCEIVABLE\n", path);
+			DEBUG("File at path %s is NOT a regular file!  INCONCEIVABLE\n", path);
 			assert(S_ISREG(file_st.st_mode));
 		}
 	}
@@ -702,8 +703,9 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	nvf->fd = result;
 	
 	nvf->serialno = file_st.st_ino;
-	
-	
+
+	nvf->node = node;
+
 	// Set FD permissions
 	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
 		DEBUG("oflag (%i) specifies O_RDWR for fd %i\n", oflag, result);
@@ -716,17 +718,21 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		nvf->canRead = 1;
 		nvf->canWrite = 1;
 		#else
-		ERROR("mmap doesn't support O_WRONLY!  goodbye.\n");
-		assert(0);
+		MSG("File %s is opened O_WRONLY.\n", path);
+		MSG("Does not support mmap, use posix instead.\n");
+		nvf->posix = 1;
 		nvf->canRead = 0;
 		nvf->canWrite = 1;
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_UNLOCK_FD_WR(nvf);
+		return nvf->fd;
 		#endif
 	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
 		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n", oflag, result);
 		nvf->canRead = 1;
 		nvf->canWrite = 0;
 	} else {
-		ERROR("File permissions don't include read or write!\n");
+		DEBUG("File permissions don't include read or write!\n");
 		nvf->canRead = 0;
 		nvf->canWrite = 0;
 		assert(0);
@@ -737,8 +743,6 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	} else {
 		nvf->append = 0;
 	}
-
-	nvf->node = node;
 
 /*
 	nvf->node->maxPerms |= (nvf->canRead)?PROT_READ:0;
@@ -768,11 +772,10 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	SANITYCHECK(nvf->node->length == file_st.st_size);
 
 	DEBUG("Meh, why not allocate a new map every time\n");
+	//nvf->node->maplength = -1;
 
 	path_to_cachefile = _bankshot2_get_cachefile_path(path);
 	ERROR("filename: %s\n", path_to_cachefile);
-
-	//nvf->node->maplength = -1;
 
 //	if(nvf->node->maplength < nvf->node->length)
 //	{
@@ -833,6 +836,12 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 
+	if (nvf->posix) {
+		nvf->valid = 0;
+		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
+		return _bankshot2_fileops->CLOSE(CALL_CLOSE);
+	}
+
 	//int iter;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
@@ -887,10 +896,15 @@ static ssize_t _bankshot2_check_write_size_valid(size_t count)
 
 RETT_READ _bankshot2_READ(INTF_READ)
 {
-	DEBUG("_bankshot2_READ\n");
+	DEBUG("_bankshot2_READ %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	
+	if (nvf->posix) {
+		DEBUG("Call posix READ for fd %d\n", nvf->fd);
+		return _bankshot2_fileops->READ(CALL_READ);
+	}
+
 	int cpuid = -1;
 
 	RETT_READ result = _bankshot2_check_read_size_valid(length);
@@ -926,9 +940,14 @@ RETT_READ _bankshot2_READ(INTF_READ)
 
 RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 {
-	DEBUG("_bankshot2_WRITE\n");
+	DEBUG("_bankshot2_WRITE %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix WRITE for fd %d\n", nvf->fd);
+		return _bankshot2_fileops->WRITE(CALL_WRITE);
+	}
 
 	//int iter;
 	int cpuid = -1;
@@ -949,7 +968,7 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 		if(nvf->append)
 		{
 			size_t temp_offset = __sync_fetch_and_add(nvf->offset, 0);
-			ERROR("PWRITE succeeded and append == true.  Setting offset to end...\n"); 
+			DEBUG("PWRITE succeeded and append == true.  Setting offset to end...\n"); 
 			assert(_bankshot2_do_seek64(nvf->fd, 0, SEEK_END) != (RETT_SEEK64)-1);
 			DEBUG("PWRITE: offset changed from %li to %li\n", temp_offset, *nvf->offset);
 			temp_offset = 4; // touch temp_offset
@@ -978,9 +997,14 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 {
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_bankshot2_PREAD\n");
+	DEBUG("_bankshot2_PREAD %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix PREAD for fd %d\n", nvf->fd);
+		return _bankshot2_fileops->PREAD(CALL_PREAD);
+	}
 
 	RETT_PREAD result = _bankshot2_check_read_size_valid(count);
 	if (result <= 0)
@@ -1003,10 +1027,15 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 {
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_bankshot2_PWRITE\n");
+	DEBUG("_bankshot2_PWRITE %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
-	
+
+	if (nvf->posix) {
+		DEBUG("Call posix PWRITE for fd %d\n", nvf->fd);
+		return _bankshot2_fileops->PWRITE(CALL_PWRITE);
+	}
+
 	RETT_PWRITE result = _bankshot2_check_write_size_valid(count);
 	if (result <= 0)
 		return result;
@@ -1096,7 +1125,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 
 	if(UNLIKELY(intersects))
 	{
-		ERROR("Buffer intersects with map (buffer %p map %p)\n", buf, nvf->node->data);
+		DEBUG("Buffer intersects with map (buffer %p map %p)\n", buf, nvf->node->data);
 		assert(0);
 		return -1;
 	}
@@ -1207,7 +1236,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 
 	if(UNLIKELY(intersects))
 	{
-		ERROR("Buffer intersects with map (buffer %p len %p, map %p to %p)\n", buf, count, nvf->node->data, nvf->node->data-nvf->node->maplength);
+		DEBUG("Buffer intersects with map (buffer %p len %p, map %p to %p)\n", buf, count, nvf->node->data, nvf->node->data-nvf->node->maplength);
 		assert(0);
 		return -1;
 	}
@@ -1320,7 +1349,12 @@ RETT_SEEK64 _bankshot2_SEEK64(INTF_SEEK64)
 	DEBUG("_bankshot2_SEEK64\n");
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
-	
+
+	if (nvf->posix) {
+		DEBUG("Call posix SEEK64 for fd %d\n", nvf->fd);
+		return _bankshot2_fileops->SEEK64(CALL_SEEK64);
+	}
+
 	int cpuid = -1;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
@@ -1403,6 +1437,11 @@ RETT_TRUNC64 _bankshot2_TRUNC64(INTF_TRUNC64)
 	DEBUG("_bankshot2_TRUNC64\n");
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix TRUNC64 for fd %d\n", nvf->fd);
+		return _bankshot2_fileops->TRUNC64(CALL_TRUNC64);
+	}
 
 	int cpuid = -1;
 	NVP_LOCK_FD_RD(nvf, cpuid);
@@ -1517,12 +1556,12 @@ RETT_DUP _bankshot2_DUP(INTF_DUP)
 	DEBUG("_bankshot2_DUP(" PFFS_DUP ")\n", CALL_DUP);
 
 	//CHECK_RESOLVE_FILEOPS(_bankshot2_);
-	if(file<0) {
+	if(file < 0) {
 		return _bankshot2_fileops->DUP(CALL_DUP);
 	}
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
-	
+	 
 	//int iter;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);	
@@ -1540,6 +1579,15 @@ RETT_DUP _bankshot2_DUP(INTF_DUP)
 	}
 
 	struct NVFile* nvf2 = &_bankshot2_fd_lookup[result];
+
+	if (nvf->posix) {
+		DEBUG("Call posix DUP for fd %d\n", nvf->fd);
+		nvf2->posix = nvf->posix;
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_UNLOCK_FD_WR(nvf);
+		return result;
+	}
+
 
 	NVP_LOCK_FD_WR(nvf2);
 	
@@ -1560,6 +1608,7 @@ RETT_DUP _bankshot2_DUP(INTF_DUP)
 	nvf2->aligned   = nvf->aligned;
 	nvf2->serialno 	= nvf->serialno;
 	nvf2->node 	= nvf->node;
+	nvf2->posix 	= nvf->posix;
 
 	SANITYCHECK(nvf2->node != NULL);
 
@@ -1599,6 +1648,12 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	struct NVFile* nvf2 = &_bankshot2_fd_lookup[fd2];
 
+	if (nvf->posix) {
+		DEBUG("Call posix DUP2 for fd %d\n", nvf->fd);
+		nvf2->posix = nvf->posix;
+		return _bankshot2_fileops->DUP2(CALL_DUP2);
+	}
+
 	//int iter;
 
 	if(file > fd2)
@@ -1613,11 +1668,11 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	if( (!nvf->valid)||(!nvf2->valid) ) {
 		errno = EBADF;
 		DEBUG("Invalid FD1 %i or FD2 %i\n", file, fd2);
-		NVP_UNLOCK_FD_WR(nvf);
-		NVP_UNLOCK_FD_WR(nvf2);
+//		NVP_UNLOCK_FD_WR(nvf);
+//		NVP_UNLOCK_FD_WR(nvf2);
 	}
 
-	if(nvf->node == nvf2->node) {
+	if(nvf->node == nvf2->node || !nvf2->node) {
 		NVP_LOCK_NODE_WR(nvf);
 	} else {
 		if(nvf->node > nvf2->node) {
@@ -1647,7 +1702,7 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 
 	nvf2->valid = 0;
 	
-	if(nvf->node != nvf2->node) { NVP_UNLOCK_NODE_WR(nvf2); }
+	if(nvf2->node && nvf->node != nvf2->node) { NVP_UNLOCK_NODE_WR(nvf2); }
 
 	_bankshot2_test_invalidate_node(nvf2);
 
@@ -1665,7 +1720,7 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 
 		if(nvf2->valid)
 		{
-			ERROR("%s->DUP2 returned a result which corresponds to an already open NVFile! dup2(%i, %i) returned %i\n", _bankshot2_fileops->name, file, fd2, result);
+			DEBUG("%s->DUP2 returned a result which corresponds to an already open NVFile! dup2(%i, %i) returned %i\n", _bankshot2_fileops->name, file, fd2, result);
 			assert(0);
 		}
 	}
@@ -1679,6 +1734,7 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	nvf2->serialno = nvf->serialno;
 	nvf2->node = nvf->node;
 	nvf2->valid = nvf->valid;
+	nvf2->posix = nvf->posix;
 
 	SANITYCHECK(nvf2->node != NULL);
 	SANITYCHECK(nvf2->valid);
@@ -1849,9 +1905,10 @@ int _bankshot2_extend_map(int file, size_t newcharlen)
 
 	if( result == MAP_FAILED || result == NULL )
 	{
-		ERROR("mmap FAILED for fd %i: %s\n", nvf->fd, strerror(errno));
-		assert(0);
-		return -1;
+		MSG("mmap failed for fd %i: %s\n", nvf->fd, strerror(errno));
+		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
+		nvf->posix = 1;
+		return 0;
 	}
 
 	if( nvf->node->data != result )
