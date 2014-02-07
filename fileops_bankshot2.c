@@ -79,6 +79,7 @@ struct NVFile
 	struct NVNode* node;
 	bool posix;	// Use Posix operations
 	int cache_fd;	// Cache file fd
+	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
 };
 
 struct NVNode
@@ -90,12 +91,14 @@ struct NVNode
 	volatile size_t maplength;
 //	volatile int maxPerms;
 //	volatile int valid; // for debugging purposes
+	int cache_fd;	// Cache file fd
+	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
 };
 
 struct NVFile* _bankshot2_fd_lookup;
 
 void _bankshot2_init2(void);
-int _bankshot2_extend_map(int file, size_t newlen);
+int _bankshot2_extend_map(struct NVFile *nvf, size_t newlen);
 int _bankshot2_test_mmap(int file, size_t newlen);
 void _bankshot2_SIGBUS_handler(int sig);
 void _bankshot2_test_invalidate_node(struct NVFile* nvf);
@@ -487,10 +490,207 @@ static char* _bankshot2_get_cachefile_path(const char *path)
 	return path_to_cachefile;
 }
 
+/* Open the cache file and mmap it. We're holding NVF lock and node lock. */
+static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
+					struct NVFile *nvf)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+
+	if(path == NULL) {
+		DEBUG("Invalid path.\n");
+		errno = EINVAL;
+		return -1;
+	}
+	
+	DEBUG("_bankshot2_Open_cache_file(%s)\n", path);
+	
+	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
+		DEBUG_P("O_RDWR ");
+	} else if(FLAGS_INCLUDE(oflag,O_WRONLY)) {
+		MSG("File mode O_WRONLY. For cache file add O_RDWR\n");
+		oflag &= ~O_WRONLY;
+		oflag |= O_RDWR;
+	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
+		DEBUG_P("O_RDONLY ");
+	}
+
+	struct stat file_st;
+
+	if(access(path, F_OK)) // file doesn't exist
+	{
+		if(FLAGS_INCLUDE(oflag, O_CREAT))
+		{
+			DEBUG("File does not exist and is set to be created.\n");
+		}
+		else
+		{
+			MSG("File does not exist and is not set to be created. Add O_CREAT\n");
+			oflag |= O_CREAT;
+		}
+	}
+	else
+	{
+		if(stat(path, &file_st))
+		{
+			DEBUG("File exists but failed to get file stats!\n");
+			errno = EACCES;
+			return -1;
+		}
+
+		if(S_ISREG(file_st.st_mode))
+		{
+			DEBUG("File at path %s is a regular file, all is well.\n", path);
+		}
+		else
+		{
+			DEBUG("File at path %s is NOT a regular file!  INCONCEIVABLE\n", path);
+			assert(S_ISREG(file_st.st_mode));
+		}
+	}
+
+	int result;
+
+	struct NVNode* node = nvf->node;
+
+	if(!node) {
+		ERROR("Node does not exist!\n");
+		assert(0);
+	}
+
+	result = _bankshot2_fileops->OPEN(path, oflag & (~O_APPEND), mode);
+
+	if(result<0)
+	{
+		DEBUG("_bankshot2_open_cache_file->%s_OPEN failed: %s\n", _bankshot2_fileops->name, strerror(errno));
+		return result;
+	}	
+
+	MSG("_bankshot2_open_cache_file succeeded for path %s: fd %i returned.  filling in file info\n", path, result);
+
+	SANITYCHECK(!access(path, F_OK)); // file exists
+//	if(FLAGS_INCLUDE(oflag, O_RDONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, R_OK)); } else { DEBUG("Read not requested\n"); }
+//	if(FLAGS_INCLUDE(oflag, O_WRONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, W_OK)); } else { DEBUG("Write not requested\n"); }
+
+	if(stat(path, &file_st))
+	{
+		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
+		assert(0);
+	}
+	else 
+	{
+		DEBUG("Stat successful for newly opened file %s (fd %i)\n", path, result);
+	}
+
+//	node->length = file_st.st_size;
+	node->maplength = 0;
+	node->cache_serialno = file_st.st_ino;
+
+	nvf->cache_fd = result;
+	
+	nvf->cache_serialno = file_st.st_ino;
+
+	// Set FD permissions
+	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
+		DEBUG("oflag (%i) specifies O_RDWR for fd %i\n", oflag, result);
+		nvf->canRead = 1;
+		nvf->canWrite = 1;
+	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
+		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n", oflag, result);
+		nvf->canRead = 1;
+		nvf->canWrite = 0;
+	} else {
+		DEBUG("File permissions don't include read or write!\n");
+		nvf->canRead = 0;
+		nvf->canWrite = 0;
+		assert(0);
+	}
+	
+	if(FLAGS_INCLUDE(oflag, O_APPEND)) {
+		nvf->append = 1;
+	} else {
+		nvf->append = 0;
+	}
+
+/*
+	nvf->node->maxPerms |= (nvf->canRead)?PROT_READ:0;
+
+	if( (!FLAGS_INCLUDE(nvf->node->maxPerms, PROT_WRITE)) && nvf->canWrite)
+	{
+		DEBUG("Map didn't have write perms, but it's about to.  We're going to need a new map.\n");
+		nvf->node->maxPerms |= PROT_WRITE;
+		//_bankshot2_extend_map(nvf->fd, nvf->node->maplength+1); // currently set to get a new map every time
+	}
+*/
+	SANITYCHECK(nvf->node != NULL);
+	SANITYCHECK(nvf->node->length >= 0);
+
+	if(FLAGS_INCLUDE(oflag, O_TRUNC) && nvf->node->length)
+	{
+		DEBUG("We just opened a file with O_TRUNC that was already open with nonzero length %li.  Updating length.\n", nvf->node->length);
+		nvf->node->length = 0;
+	}
+/*
+	if(stat(path, &file_st)) // in case of multithreading it's good to update.  // TODO this is obviously a race condition...
+	{
+		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
+		assert(0);
+	}
+*/
+	SANITYCHECK(nvf->node->length == file_st.st_size);
+
+	DEBUG("Meh, why not allocate a new map every time\n");
+	//nvf->node->maplength = -1;
+
+//	if(nvf->node->maplength < nvf->node->length)
+//	{
+//		DEBUG("map was not already allocated (was %li).  Let's allocate one.\n", nvf->node->maplength);
+//		_bankshot2_extend_map(nvf->fd, nvf->node->length);
+	
+		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
+	MSG("Try to mmap file\n");
+	if(_bankshot2_extend_map(nvf, MAX(1, nvf->node->length)))
+	{
+		MSG("Failed to mmap cache fd %d. Don't cache it, just use Posix.\n");
+		return -1;
+	}
+
+	SANITYCHECK(nvf->node->maplength > 0);
+	SANITYCHECK(nvf->node->maplength > nvf->node->length);
+
+	if(nvf->node->data < 0) {
+		ERROR("Failed to mmap path %s: %s\n", path, strerror(errno));
+		assert(0);
+	}
+
+	MSG("mmap successful.  result: %p\n", nvf->node->data);
+//	}
+
+	SANITYCHECK(nvf->node->length >= 0);
+	SANITYCHECK(nvf->node->maplength > nvf->node->length);
+
+	nvf->offset = (size_t*)calloc(1, sizeof(int));
+	*nvf->offset = 0;
+
+	if(FLAGS_INCLUDE(oflag, O_DIRECT) && (DO_ALIGNMENT_CHECKS)) {
+		nvf->aligned = 1;
+	} else {
+		nvf->aligned = 0;
+	}
+
+	nvf->valid = 1;
+	//nvf->node->valid = 1;
+	
+	DO_MSYNC(nvf);
+
+	errno = 0;
+	return nvf->cache_fd;
+}
 
 RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 {
 	char *path_to_cachefile;
+	int mode = 0;
+	int skip_mmap_test = 0;
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
@@ -613,7 +813,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	{
 		va_list arg;
 		va_start(arg, oflag);
-		int mode = va_arg(arg, int);
+		mode = va_arg(arg, int);
 		va_end(arg);
 		result = _bankshot2_fileops->OPEN(path, oflag & (~O_APPEND), mode);
 	} else {
@@ -721,13 +921,11 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		nvf->canWrite = 1;
 		#else
 		MSG("File %s is opened O_WRONLY.\n", path);
-		MSG("Does not support mmap, use posix instead.\n");
-		nvf->posix = 1;
+		MSG("Does not support mmap, we will try a cache file with O_RDWR.\n");
+//		nvf->posix = 1;
 		nvf->canRead = 0;
 		nvf->canWrite = 1;
-		NVP_UNLOCK_NODE_WR(nvf);
-		NVP_UNLOCK_FD_WR(nvf);
-		return nvf->fd;
+		skip_mmap_test = 1;
 		#endif
 	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
 		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n", oflag, result);
@@ -777,7 +975,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	//nvf->node->maplength = -1;
 
 	path_to_cachefile = _bankshot2_get_cachefile_path(path);
-	ERROR("filename: %s\n", path_to_cachefile);
+	MSG("Cache filename: %s\n", path_to_cachefile);
 
 //	if(nvf->node->maplength < nvf->node->length)
 //	{
@@ -786,7 +984,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	
 		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
 //	if(_bankshot2_extend_map(nvf->fd, MAX(1, nvf->node->length)))
-	if(_bankshot2_test_mmap(nvf->fd, MAX(1, nvf->node->length)))
+	if(skip_mmap_test == 0 && _bankshot2_test_mmap(nvf->fd, MAX(1, nvf->node->length)))
 	{
 		MSG("Failed to mmap fd %d. Don't cache it, just use Posix.\n");
 		NVP_UNLOCK_NODE_WR(nvf);
@@ -794,6 +992,11 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		free(path_to_cachefile);
 		nvf->posix = 1;
 		return nvf->fd;
+	}
+
+	if (_bankshot2_open_cache_file(path_to_cachefile, oflag, mode, nvf) < 0) {
+		ERROR("Open Cache File %s for %s failed!\n", path_to_cachefile, path);
+		assert(0);
 	}
 
 	SANITYCHECK(nvf->node->maplength > 0);
@@ -1267,7 +1470,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 		if( offset+count >= nvf->node->maplength )
 		{
 			DEBUG("Request will also extend map; doing that before extending file.\n");
-			_bankshot2_extend_map(file, offset+count );
+			_bankshot2_extend_map(nvf, offset+count );
 		} else {
 			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->maplength, offset+count);
 			SANITYCHECK(nvf->node->maplength > (offset+count));
@@ -1493,7 +1696,7 @@ RETT_TRUNC64 _bankshot2_TRUNC64(INTF_TRUNC64)
 
 	DEBUG("Done with trunc, we better update map!\n");
 
-	_bankshot2_extend_map(nvf->fd, length);
+	_bankshot2_extend_map(nvf, length);
 
 	nvf->node->length = length;
 
@@ -1815,9 +2018,9 @@ static int _bankshot2_get_fd_with_max_perms(struct NVFile *nvf, int file, int *m
 	return fd_with_max_perms;
 }
 
-int _bankshot2_extend_map(int file, size_t newcharlen)
+int _bankshot2_extend_map(struct NVFile *nvf, size_t newcharlen)
 {
-	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	int file = nvf->cache_fd;
 
 	size_t newmaplen = (newcharlen/MMAP_PAGE_SIZE + 1)*MMAP_PAGE_SIZE;
 	
@@ -1888,6 +2091,7 @@ int _bankshot2_extend_map(int file, size_t newcharlen)
 #endif
 
 
+	MSG("mmap fd %d\n", fd_with_max_perms);
 	// mmap replaces old maps where they intersect
 	char* result = (char*) FSYNC_MMAP
 	(
@@ -1918,8 +2122,8 @@ int _bankshot2_extend_map(int file, size_t newcharlen)
 
 	if( result == MAP_FAILED || result == NULL )
 	{
-		MSG("mmap failed for fd %i: %s\n", nvf->fd, strerror(errno));
-		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
+		MSG("mmap failed for fd %i: %s\n", nvf->cache_fd, strerror(errno));
+		MSG("Use posix operations for fd %i instead.\n", nvf->cache_fd);
 		nvf->posix = 1;
 		return 0;
 	}
