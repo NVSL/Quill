@@ -96,6 +96,7 @@ struct NVFile* _bankshot2_fd_lookup;
 
 void _bankshot2_init2(void);
 int _bankshot2_extend_map(int file, size_t newlen);
+int _bankshot2_test_mmap(int file, size_t newlen);
 void _bankshot2_SIGBUS_handler(int sig);
 void _bankshot2_test_invalidate_node(struct NVFile* nvf);
 
@@ -784,8 +785,8 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 //		_bankshot2_extend_map(nvf->fd, nvf->node->length);
 	
 		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
-	if(_bankshot2_extend_map(nvf->fd, MAX(1, nvf->node->length)))
-//	if(_bankshot2_test_mmap(nvf->fd, MAX(1, nvf->node->length)))
+//	if(_bankshot2_extend_map(nvf->fd, MAX(1, nvf->node->length)))
+	if(_bankshot2_test_mmap(nvf->fd, MAX(1, nvf->node->length)))
 	{
 		MSG("Failed to mmap fd %d. Don't cache it, just use Posix.\n");
 		NVP_UNLOCK_NODE_WR(nvf);
@@ -1774,7 +1775,7 @@ RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL)
 
 #define TIME_EXTEND 0
 
-static int _bankshot2_get_file_with_max_perms(struct NVFile *nvf, int file, int *max_perms)
+static int _bankshot2_get_fd_with_max_perms(struct NVFile *nvf, int file, int *max_perms)
 {
 	int fd_with_max_perms = file; // may not be marked as valid
 
@@ -1970,6 +1971,105 @@ int _bankshot2_extend_map(int file, size_t newcharlen)
 	MSG("Time to extend map for %p was %ius\n", nvf->node, time_us);
 #endif
 	return 0;
+}
+
+int _bankshot2_test_mmap(int file, size_t newcharlen)
+{
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	int ret = 0;
+
+	size_t newmaplen = (newcharlen/MMAP_PAGE_SIZE + 1)*MMAP_PAGE_SIZE;
+	
+	if(nvf->node->maplength > 0) {
+		newmaplen *= 2;
+	}
+	
+	//int newmaplen = newcharlen + 1;
+
+	SANITYCHECK(nvf->node != NULL);
+	//SANITYCHECK(nvf->node->valid);
+	//SANITYCHECK(newmaplen > nvf->node->maplength);
+	SANITYCHECK(newmaplen > newcharlen);
+
+	if(newmaplen < nvf->node->maplength)
+	{
+		DEBUG("Just kidding, _bankshot2_extend_map is actually going to SHRINK the map from %li to %li\n", nvf->node->maplength, newmaplen);
+	}
+	else
+	{
+		DEBUG("_bankshot2_extend_map increasing map length from %li to %li\n", nvf->node->maplength, newmaplen);
+	}
+
+/*	// munmap first
+	if(nvf->node->data != NULL) {
+		DEBUG("Let's try munmapping every time.\n");
+
+		if(munmap(nvf->node->data, nvf->node->maplength))
+		{
+			ERROR("Couldn't munmap: %s\n", strerror(errno));
+		}
+	}
+*/
+	
+	int fd_with_max_perms = file; // may not be marked as valid
+	int max_perms = ((nvf->canRead)?PROT_READ:0)|((nvf->canWrite)?PROT_WRITE:0);
+
+	SANITYCHECK(max_perms);
+//	SANITYCHECK(FLAGS_INCLUDE(max_perms, PROT_READ));
+
+//	DEBUG("newcharlen is %li bytes (%li MB) (%li GB)\n", newcharlen, newcharlen/1024/1024, newcharlen/1024/1024/1024);
+
+	fd_with_max_perms = _bankshot2_get_fd_with_max_perms(nvf, file, &max_perms);
+/*
+	if(nvf->node->maxPerms != max_perms)
+	{
+		DEBUG("Max perms for node %p are changing (to %i).\n", nvf->node, max_perms);
+	}
+*/
+	if(file != fd_with_max_perms) {
+		DEBUG("Was going to extend map with fd %i, but changed to %i because it has higher perms\n", file, fd_with_max_perms);
+	} else {
+		DEBUG("Going to extend map with the same fd that was called (%i)\n", file);
+	}
+
+	DEBUG("Requesting read perms? %s   Requesting write perms? %s\n", ((FLAGS_INCLUDE(max_perms, PROT_READ)?"yes":"no")), ((FLAGS_INCLUDE(max_perms, PROT_WRITE)?"yes":"no")));
+
+//	nvf->node->maxPerms = max_perms;
+
+#ifndef MAP_HUGETLB
+#define MAP_HUGETLB 0x40000 /* arch specific */
+#endif
+
+
+	// mmap replaces old maps where they intersect
+	char* result = (char*) FSYNC_MMAP
+	(
+		nvf->node->data,
+		newmaplen,
+		max_perms, //max_perms,
+		MAP_SHARED //|  MAP_HUGETLB
+		#if MMAP_PREFAULT
+			|MAP_POPULATE
+		#endif
+		,
+		fd_with_max_perms, //fd_with_max_perms,
+		0
+	);
+
+	if( result == MAP_FAILED || result == NULL )
+	{
+		MSG("mmap failed for fd %i: %s\n", nvf->fd, strerror(errno));
+		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
+		nvf->posix = 1;
+		ret = -1;
+	}
+	else
+	{
+		DEBUG("mmap succeed. Unmap it and create a cache file.\n");
+		munmap(result, newmaplen);
+	}
+
+	return ret;
 }
 
 void _bankshot2_test_invalidate_node(struct NVFile* nvf)
