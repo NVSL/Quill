@@ -1,6 +1,10 @@
 
 This file includes basic info about how to use libnvm.
 
+===============================================================================
+				Introduction
+===============================================================================
+
 libnvm consists of a collection of "modules".  Each module contains a set of
 functions which wrap or replace a bunch of standard system calls, most notably
 open, read, write, close, and lseek.  For a complete list of wrapped functions,
@@ -71,7 +75,19 @@ of two targets, MANAGED or UNMANAGED.  Current implementation: if a file is
 acceptable for Moneta, it is assigned to MANAGED.
 
 
+===============================================================================
+				Build
+===============================================================================
 
+Just run make in the directory.
+
+Boost is required to compile.
+/lib64/libc.so.6 must exist for quill to run.
+
+
+===============================================================================
+				Usage
+===============================================================================
 
 Examples of setting up calling trees in a Makefile:
 # Just use the default file operations
@@ -89,7 +105,9 @@ test1:
 	./run_quill.sh -p </path/to/quill> -t <tree_name> ./mytest
 
 
-How to add a new module
+===============================================================================
+			How to add a new module
+===============================================================================
 
 Let's say you want to add a new module "foo" with 1 target:
 
