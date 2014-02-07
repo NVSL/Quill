@@ -794,16 +794,18 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
+	if (nvf->posix) {
+		nvf->valid = 0;
+		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
+		return _nvp_fileops->CLOSE(CALL_CLOSE);
+	}
+
 	//int iter;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_WR(nvf);
 
 	nvf->valid = 0;
-
-	if (nvf->posix) {
-		nvf->valid = 0;
-	}
 
 	//_nvp_test_invalidate_node(nvf);
 
