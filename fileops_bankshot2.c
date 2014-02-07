@@ -77,7 +77,8 @@ struct NVFile
 	bool aligned;
 	ino_t serialno; // duplicated so that iterating doesn't require following every node*
 	struct NVNode* node;
-	bool posix;
+	bool posix;	// Use Posix operations
+	int cache_fd;	// Cache file fd
 };
 
 struct NVNode
@@ -783,24 +784,26 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 //		_bankshot2_extend_map(nvf->fd, nvf->node->length);
 	
 		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
-		if(_bankshot2_extend_map(nvf->fd, MAX(1, nvf->node->length)))
-		{
-			DEBUG("Failed to _bankshot2_extend_map, passing it up the chain\n");
-			NVP_UNLOCK_NODE_WR(nvf);
-			NVP_UNLOCK_FD_WR(nvf);
-			free(path_to_cachefile);
-			return -1;
-		}
+	if(_bankshot2_extend_map(nvf->fd, MAX(1, nvf->node->length)))
+//	if(_bankshot2_test_mmap(nvf->fd, MAX(1, nvf->node->length)))
+	{
+		MSG("Failed to mmap fd %d. Don't cache it, just use Posix.\n");
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_UNLOCK_FD_WR(nvf);
+		free(path_to_cachefile);
+		nvf->posix = 1;
+		return nvf->fd;
+	}
 
-		SANITYCHECK(nvf->node->maplength > 0);
-		SANITYCHECK(nvf->node->maplength > nvf->node->length);
-		
-		if(nvf->node->data < 0) {
-			ERROR("Failed to mmap path %s: %s\n", path, strerror(errno));
-			assert(0);
-		}
+	SANITYCHECK(nvf->node->maplength > 0);
+	SANITYCHECK(nvf->node->maplength > nvf->node->length);
 
-		DEBUG("mmap successful.  result: %p\n", nvf->node->data);
+	if(nvf->node->data < 0) {
+		ERROR("Failed to mmap path %s: %s\n", path, strerror(errno));
+		assert(0);
+	}
+
+	DEBUG("mmap successful.  result: %p\n", nvf->node->data);
 //	}
 
 	SANITYCHECK(nvf->node->length >= 0);
@@ -1771,6 +1774,46 @@ RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL)
 
 #define TIME_EXTEND 0
 
+static int _bankshot2_get_file_with_max_perms(struct NVFile *nvf, int file, int *max_perms)
+{
+	int fd_with_max_perms = file; // may not be marked as valid
+
+	if( (!FLAGS_INCLUDE(*max_perms, PROT_READ)) || (!FLAGS_INCLUDE(*max_perms, PROT_WRITE)) )
+	{
+		int i;
+		for(i=0; i<OPEN_MAX; i++)
+		{
+			if( (_bankshot2_fd_lookup[i].valid) && (nvf->node==_bankshot2_fd_lookup[i].node) )
+			{
+				if( (!FLAGS_INCLUDE(*max_perms, PROT_READ)) && (_bankshot2_fd_lookup[i].canRead) )
+				{
+					DEBUG("FD %i is adding read perms and is the new fd_with_max_perms (was %i, called with %i)\n", i, fd_with_max_perms, file);
+					*max_perms = PROT_READ;
+					fd_with_max_perms = i;
+				}
+				if( (!FLAGS_INCLUDE(*max_perms, PROT_WRITE)) && (_bankshot2_fd_lookup[i].canWrite) )
+				{
+					DEBUG("FD %i is adding write perms and is the new fd_with_max_perms, but may include O_APPEND (was %i, called with %i)\n", i, fd_with_max_perms, file);
+					*max_perms = PROT_READ|PROT_WRITE;
+					fd_with_max_perms = i;
+				}
+				if( (_bankshot2_fd_lookup[i].canWrite) && (!_bankshot2_fd_lookup[i].append) )
+				{
+					DEBUG("FD %i is adding write perms and is the new fd_with_max_perms (was %i, called with %i)\n", i, fd_with_max_perms, file);
+					fd_with_max_perms = i;
+					break;
+				}
+			}
+		}
+	}
+
+	DEBUG("FD with max perms %i has read? %s   has write? %s\n", fd_with_max_perms, (_bankshot2_fd_lookup[fd_with_max_perms].canRead)?"yes":"no", (_bankshot2_fd_lookup[fd_with_max_perms].canWrite)?"yes":"no");
+
+	SANITYCHECK(FLAGS_INCLUDE(*max_perms, PROT_READ));
+
+	return fd_with_max_perms;
+}
+
 int _bankshot2_extend_map(int file, size_t newcharlen)
 {
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
@@ -1822,38 +1865,7 @@ int _bankshot2_extend_map(int file, size_t newcharlen)
 
 //	DEBUG("newcharlen is %li bytes (%li MB) (%li GB)\n", newcharlen, newcharlen/1024/1024, newcharlen/1024/1024/1024);
 
-	if( (!FLAGS_INCLUDE(max_perms, PROT_READ)) || (!FLAGS_INCLUDE(max_perms, PROT_WRITE)) )
-	{
-		int i;
-		for(i=0; i<OPEN_MAX; i++)
-		{
-			if( (_bankshot2_fd_lookup[i].valid) && (nvf->node==_bankshot2_fd_lookup[i].node) )
-			{
-				if( (!FLAGS_INCLUDE(max_perms, PROT_READ)) && (_bankshot2_fd_lookup[i].canRead) )
-				{
-					DEBUG("FD %i is adding read perms and is the new fd_with_max_perms (was %i, called with %i)\n", i, fd_with_max_perms, file);
-					max_perms = PROT_READ;
-					fd_with_max_perms = i;
-				}
-				if( (!FLAGS_INCLUDE(max_perms, PROT_WRITE)) && (_bankshot2_fd_lookup[i].canWrite) )
-				{
-					DEBUG("FD %i is adding write perms and is the new fd_with_max_perms, but may include O_APPEND (was %i, called with %i)\n", i, fd_with_max_perms, file);
-					max_perms = PROT_READ|PROT_WRITE;
-					fd_with_max_perms = i;
-				}
-				if( (_bankshot2_fd_lookup[i].canWrite) && (!_bankshot2_fd_lookup[i].append) )
-				{
-					DEBUG("FD %i is adding write perms and is the new fd_with_max_perms (was %i, called with %i)\n", i, fd_with_max_perms, file);
-					fd_with_max_perms = i;
-					break;
-				}
-			}
-		}
-	}
-
-	DEBUG("FD with max perms %i has read? %s   has write? %s\n", fd_with_max_perms, (_bankshot2_fd_lookup[fd_with_max_perms].canRead)?"yes":"no", (_bankshot2_fd_lookup[fd_with_max_perms].canWrite)?"yes":"no");
-
-	SANITYCHECK(FLAGS_INCLUDE(max_perms, PROT_READ));
+	fd_with_max_perms = _bankshot2_get_fd_with_max_perms(nvf, file, &max_perms);
 /*
 	if(nvf->node->maxPerms != max_perms)
 	{
