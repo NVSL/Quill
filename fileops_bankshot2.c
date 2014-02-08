@@ -1482,11 +1482,11 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 
 		ssize_t temp_result;
 		if(nvf->aligned) {
-			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _bankshot2_fileops->name, nvf->fd, _bankshot2_zbuf, 512, count+offset-512);
-			temp_result = _bankshot2_fileops->PWRITE(nvf->fd, _bankshot2_zbuf, 512, count + offset - 512);
+			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _bankshot2_fileops->name, nvf->cache_fd, _bankshot2_zbuf, 512, count+offset-512);
+			temp_result = _bankshot2_fileops->PWRITE(nvf->cache_fd, _bankshot2_zbuf, 512, count + offset - 512);
 		} else {
 			DEBUG_P("(unaligned)\n");
-			temp_result = _bankshot2_fileops->PWRITE(nvf->fd, "\0", 1, count + offset - 1);
+			temp_result = _bankshot2_fileops->PWRITE(nvf->cache_fd, "\0", 1, count + offset - 1);
 		}	
 
 		if(temp_result != ((nvf->aligned)?512:1))
