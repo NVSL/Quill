@@ -104,6 +104,49 @@ test1:
 	gcc mytest.c -o mytest
 	./run_quill.sh -p </path/to/quill> -t <tree_name> ./mytest
 
+When using Quill to run the program, it will echo the following lines:
+
+	NVP_MSG: Initializing the libnvp hub.  If you're reading this, the library is being loaded! 
+	NVP_MSG: Call tree will be parsed from ./bin/tree_name
+
+An example is shown below.
+
+
+===============================================================================
+				Example
+===============================================================================
+
+Take helloworld.c under test folder as example:
+
+	cd test
+	gcc helloworld.c -o helloworld
+
+When running directly:
+
+	./helloworld
+
+It shows:
+	Hello World!
+	Program complete.  Goodbye!
+	./helloworld.testexe: RESULT: SUCCESS
+
+When running with Quill library and nvp_wrap.tree:
+
+	cd ../
+	./run_quill.sh -p ./ -t nvp_wrap.tree test/helloworld
+
+It shows:
+	Quill path = ./
+	tree = ./bin/nvp_wrap.tree
+	NVP_MSG (22510): Initializing the libnvp hub.  If you're reading this, the library is being loaded! (this is PID 22510, my parent is 22509)
+	NVP_MSG (22510): Call tree will be parsed from ./bin/nvp_wrap.tree
+	Hello World!
+	CALL: _wrap_OPEN is calling "posix"->OPEN(helloworld.txt, 66, 438)
+	CALL: _wrap_WRITE is calling "posix"->WRITE(4, 0xF29730, 13)
+	CALL: _wrap_CLOSE is calling "posix"->CLOSE(4)
+	Program complete.  Goodbye!
+	./helloworld.testexe: RESULT: SUCCESS
+
 
 ===============================================================================
 			How to add a new module
