@@ -89,16 +89,11 @@ Boost is required to compile.
 				Usage
 ===============================================================================
 
-Examples of setting up calling trees in a Makefile:
-# Just use the default file operations
-test0:
-	gcc mytest.c -o mytest
-	./mytest
+You just need to specify where Quill is and which module you want to use, by
+specifying the tree name.
 
-# Just use the default file operations, but echo the names as they are used
-test1:
 	gcc mytest.c -o mytest
-	export LD_LIBRARY_PATH=$(MY_LD_LIB_PATH); export LD_PRELOAD="libnvp.so"; export NVP_TREE_FILE="nvp_wrap.tree"; ./mytest
+	export LD_LIBRARY_PATH=$(MY_LD_LIB_PATH); export LD_PRELOAD="libnvp.so"; export NVP_TREE_FILE=$(TREE_NAME); ./mytest
 
 # A simpler way is to use the run_quill.sh script:
 	gcc mytest.c -o mytest
@@ -125,17 +120,17 @@ When running directly:
 
 	./helloworld
 
-It shows:
+Output:
 	Hello World!
 	Program complete.  Goodbye!
 	./helloworld.testexe: RESULT: SUCCESS
 
-When running with Quill library and nvp_wrap.tree:
+When running with Quill library and nvp_wrap.tree (wrap module), which echos allthe file operations the application calls: 
 
 	cd ../
 	./run_quill.sh -p ./ -t nvp_wrap.tree test/helloworld
 
-It shows:
+Output:
 	Quill path = ./
 	tree = ./bin/nvp_wrap.tree
 	NVP_MSG (22510): Initializing the libnvp hub.  If you're reading this, the library is being loaded! (this is PID 22510, my parent is 22509)
