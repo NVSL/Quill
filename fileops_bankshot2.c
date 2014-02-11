@@ -1359,27 +1359,33 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 	SANITYCHECK(len_to_read + offset <= nvf->node->length);
 	SANITYCHECK(nvf->node->length < nvf->node->maplength);
 
+	/* If request extent not in cache, we need to read it from backing store and copy to cache */
+	if (!extent_in_cache(file, offset, count)) {
+		void* result = copy_to_cache(INTF_PREAD);
+		insert_extent(file, offset, count);
+	} else { // File extent already in cache. Just copy it to buf.
 #if TIME_READ_MEMCPY
 //	int cpu = get_cpuid();
-	uint64_t start_time = getcycles();
+		uint64_t start_time = getcycles();
 #endif
 
-	#if NOSANITYCHECK
-	#else
-	void* result =
-	#endif
+#if NOSANITYCHECK
+#else
+		void* result =
+#endif
 //		FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
-		memcpy1(buf, nvf->node->data+offset, len_to_read);
+			memcpy1(buf, nvf->node->data+offset, len_to_read);
 
 
 #if TIME_READ_MEMCPY
-	uint64_t end_time = getcycles();
-	total_memcpy_cycles += end_time - start_time;
+		uint64_t end_time = getcycles();
+		total_memcpy_cycles += end_time - start_time;
 //	if(cpu != get_cpuid()) {
 //		printf("cpuid changed\n");
 //		exit(1);
 //	}
 #endif
+	}
 
 	SANITYCHECK(result == buf);
 	SANITYCHECK(result > 0);
