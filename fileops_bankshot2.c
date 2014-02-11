@@ -1790,6 +1790,7 @@ RETT_DUP _bankshot2_DUP(INTF_DUP)
 	if (nvf->posix) {
 		DEBUG("Call posix DUP for fd %d\n", nvf->fd);
 		nvf2->posix = nvf->posix;
+		nvf2->cache_fd = nvf->cache_fd;
 		NVP_UNLOCK_NODE_WR(nvf);
 		NVP_UNLOCK_FD_WR(nvf);
 		return result;
@@ -1816,6 +1817,7 @@ RETT_DUP _bankshot2_DUP(INTF_DUP)
 	nvf2->serialno 	= nvf->serialno;
 	nvf2->node 	= nvf->node;
 	nvf2->posix 	= nvf->posix;
+	nvf2->cache_fd	= nvf->cache_fd;
 
 	SANITYCHECK(nvf2->node != NULL);
 
@@ -1846,19 +1848,25 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 		return -1;
 	}
 
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	struct NVFile* nvf2 = &_bankshot2_fd_lookup[fd2];
+
+	/* We want to DUP the cache fd actually */
+	file = nvf->cache_fd;
+
 	if(file == fd2)
 	{
 		DEBUG("Input and output files were the same (%i)\n", file);
 		return file;
 	}
 
-	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
-	struct NVFile* nvf2 = &_bankshot2_fd_lookup[fd2];
-
 	if (nvf->posix) {
 		DEBUG("Call posix DUP2 for fd %d\n", nvf->fd);
 		nvf2->posix = nvf->posix;
-		return _bankshot2_fileops->DUP2(CALL_DUP2);
+		int result = _bankshot2_fileops->DUP2(CALL_DUP2);
+		nvf2->fd = result;
+		nvf2->cache_fd = nvf->cache_fd;
+		return result;
 	}
 
 	//int iter;
@@ -1942,6 +1950,7 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	nvf2->node = nvf->node;
 	nvf2->valid = nvf->valid;
 	nvf2->posix = nvf->posix;
+	nvf2->cache_fd = nvf->cache_fd;
 
 	SANITYCHECK(nvf2->node != NULL);
 	SANITYCHECK(nvf2->valid);
@@ -2023,7 +2032,9 @@ int _bankshot2_extend_map(struct NVFile *nvf, size_t newcharlen)
 	int file = nvf->cache_fd;
 
 	size_t newmaplen = (newcharlen/MMAP_PAGE_SIZE + 1)*MMAP_PAGE_SIZE;
-	
+
+	DEBUG("Extend mapping for fd %d, cache fd %d\n", nvf->fd, nvf->cache_fd);
+
 #if TIME_EXTEND
 	struct timeval start;
 	struct timeval end;
