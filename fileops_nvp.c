@@ -1609,7 +1609,9 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 	if (nvf->posix) {
 		DEBUG("Call posix DUP2 for fd %d\n", nvf->fd);
 		nvf2->posix = nvf->posix;
-		return _nvp_fileops->DUP2(CALL_DUP2);
+		int result = _nvp_fileops->DUP2(CALL_DUP2);
+		nvf2->fd = result;
+		return result;
 	}
 
 	//int iter;
