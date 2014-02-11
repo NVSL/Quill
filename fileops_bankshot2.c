@@ -647,7 +647,7 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 //		_bankshot2_extend_map(nvf->fd, nvf->node->length);
 	
 		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
-	MSG("Try to mmap file\n");
+	MSG("Try to mmap file %s, fd %d, cache fd %d\n", path, nvf->fd, nvf->cache_fd);
 	if(_bankshot2_extend_map(nvf, MAX(1, nvf->node->length)))
 	{
 		MSG("Failed to mmap cache fd %d. Don't cache it, just use Posix.\n");
@@ -2102,7 +2102,7 @@ int _bankshot2_extend_map(struct NVFile *nvf, size_t newcharlen)
 #endif
 
 
-	MSG("mmap fd %d\n", fd_with_max_perms);
+	DEBUG("mmap fd %d\n", fd_with_max_perms);
 	// mmap replaces old maps where they intersect
 	char* result = (char*) FSYNC_MMAP
 	(
