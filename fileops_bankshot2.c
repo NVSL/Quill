@@ -1336,7 +1336,13 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 	if (ret == 0 || ret == 2) {
 		// Not fully in cache. Copy to cache first and add extent.
 //		void* result = copy_to_cache(INTF_PREAD);
+
+		// Acquire node write lock for add_extent
+		NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+		NVP_LOCK_NODE_WR(nvf);
 		add_extent(nvf, offset, len_to_read, 0);
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
 	}
 
 	// File extent in cache. Just copy it to buf.
