@@ -1381,6 +1381,10 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 
 RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 {
+	int ret = 0;
+	off_t write_offset;
+	size_t write_count;
+
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
 	DEBUG("_bankshot2_do_pwrite\n");
@@ -1514,7 +1518,22 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
 
-	FSYNC_MEMCPY(nvf->node->data+offset, buf, count);
+	/* If request extent not in cache, we need to add extent */
+	write_count = count;
+	write_offset = offset;
+	ret = find_extent(nvf, &write_offset, &write_count);
+	if (ret == 0 || ret == 2) {
+		// Not fully in cache. Add extent.
+
+		// Acquire node write lock for add_extent
+		NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+		NVP_LOCK_NODE_WR(nvf);
+		add_extent(nvf, offset, count, 1);
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+	}
+
+	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
 
 	if(extension > 0) {
 		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->length, nvf->node->length + extension);
