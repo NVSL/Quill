@@ -1360,9 +1360,9 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 	SANITYCHECK(nvf->node->length < nvf->node->maplength);
 
 	/* If request extent not in cache, we need to read it from backing store and copy to cache */
-	if (!extent_in_cache(file, offset, count)) {
+	if (!extent_in_cache(nvf, offset, count)) {
 		void* result = copy_to_cache(INTF_PREAD);
-		insert_extent(file, offset, count);
+		insert_extent(nvf, offset, count);
 	} else { // File extent already in cache. Just copy it to buf.
 #if TIME_READ_MEMCPY
 //	int cpu = get_cpuid();
