@@ -1,18 +1,5 @@
 // a module which repalces the standart POSIX functions with memory mapped equivalents
 
-#include "nv_common.h"
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <pthread.h>
-#include <signal.h>
-#include <sys/mman.h>
-
-#include "perfcount.h"
-
-#include "nvp_mman.h"
-#include "nvp_lock.h"
-
 #include "fileops_bankshot2.h"
 
 //#include "my_memcpy_nocache.h"
@@ -555,6 +542,8 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 //	node->length = file_st.st_size;
 	node->maplength = 0;
 	node->cache_serialno = file_st.st_ino;
+
+	bankshot2_setup_extent_tree(node);
 
 	nvf->cache_fd = result;
 	

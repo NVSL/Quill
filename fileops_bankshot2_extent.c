@@ -1,3 +1,4 @@
+#include "fileops_bankshot2.h"
 #include "red_black_tree.h"
 
 int extent_rbtree_compare(const void *left, const void *right)
@@ -34,7 +35,7 @@ void extent_rbtree_destroyinfo(void *key)
 {
 }
 
-void extent_rbtree_printkey(void *key)
+void extent_rbtree_printkey(const void *key)
 {
 	const struct extent_cache_entry *current = key;
 	DEBUG("0x%.16llx to 0x%.16llx %d\n", current->offset,
@@ -68,7 +69,7 @@ int find_extent(struct NVFile *nvf, off_t offset, size_t count)
 	struct NVNode *node = nvf->node;
 	rb_red_blk_node *x;
 	rb_red_blk_node *nil;
-	rb_red_blk_node *tree = node->extent_tree;
+	rb_red_blk_tree *tree = node->extent_tree;
 	int compVal;
 
 	x = tree->root->left;

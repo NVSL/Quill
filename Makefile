@@ -35,7 +35,7 @@ libfileops_sem.so: fileops_sem.o $(COMMON_OBJ)
 libfileops_nvp.so: fileops_nvp.o $(COMMON_OBJ)
 	$(CC) $(CFLAGS) -shared -Wl,-soname,$@ -o $@ $< $(COMMON_OBJ) -ldl -funroll-loops
 
-libfileops_bankshot2.so: fileops_bankshot2.o $(COMMON_OBJ)
+libfileops_bankshot2.so: fileops_bankshot2.o $(COMMON_OBJ) 
 	$(CC) $(CFLAGS) -shared -Wl,-soname,$@ -o $@ $< $(COMMON_OBJ) -ldl -funroll-loops
 
 # Don't require special treatment

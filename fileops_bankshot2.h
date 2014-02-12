@@ -2,8 +2,20 @@
 
 #ifndef __NV_FILEOPS_H_
 #define __NV_FILEOPS_H_
+#endif
 
 #include "nv_common.h"
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <signal.h>
+#include <sys/mman.h>
+
+#include "perfcount.h"
+
+#include "nvp_mman.h"
+#include "nvp_lock.h"
 
 #define ENV_NV_FOP "NVP_NV_FOP"
 
@@ -65,6 +77,15 @@ struct NVNode
 //	volatile int valid; // for debugging purposes
 	int cache_fd;	// Cache file fd
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
+	void *extent_tree;
+};
+
+struct extent_cache_entry
+{
+	off_t offset;
+	size_t count;
+	int dirty;
+	struct extent_cache_entry *next;
 };
 
 // declare and alias all the functions in ALLOPS
@@ -76,5 +97,10 @@ int _bankshot2_resize_file(struct NVFile* file, int newLength);
 int _bankshot2_remap(struct NVFile* file, int newLength);
 
 
-#endif
+void bankshot2_setup_extent_tree(struct NVNode *node);
+void bankshot2_cleanup_extent_tree(struct NVNode *node);
+int find_extent(struct NVFile *nvf, off_t offset, size_t count);
+void remove_extent(struct NVFile *nvf, off_t offset);
+void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write);
+
 
