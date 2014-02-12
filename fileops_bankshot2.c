@@ -1240,6 +1240,60 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 	return result;
 }
 
+void copy_to_cache(struct NVFile *nvf, char *buf, off_t offset, size_t count)
+{
+	ssize_t extension = count + offset - (nvf->node->length) ;
+
+	if(extension > 0)
+	{
+
+		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
+			count, nvf->node->length, offset, count, extension);
+		
+		if(offset + count >= nvf->node->maplength )
+		{
+			DEBUG("Request will also extend map; doing that before extending file.\n");
+			_bankshot2_extend_map(nvf, offset+count);
+		} else {
+			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->maplength, offset+count);
+			SANITYCHECK(nvf->node->maplength > (offset + count));
+		}
+
+		DEBUG("Done extending map(s), now let's exend the cache file with PWRITE ");
+
+//volatile int asdf=1; while(asdf){};
+
+		ssize_t temp_result;
+		if(nvf->aligned) {
+			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _bankshot2_fileops->name, nvf->cache_fd, _bankshot2_zbuf, 512, count+offset-512);
+			temp_result = _bankshot2_fileops->PWRITE(nvf->cache_fd, _bankshot2_zbuf, 512, count + offset - 512);
+		} else {
+			DEBUG_P("(unaligned)\n");
+			temp_result = _bankshot2_fileops->PWRITE(nvf->cache_fd, "\0", 1, count + offset - 1);
+		}	
+
+		if(temp_result != ((nvf->aligned)?512:1))
+		{
+			ERROR("Failed to use posix->pwrite to extend the file to the required length: returned %li, expected %li: %s\n", temp_result, ((nvf->aligned)?512:1), strerror(errno));
+			if(nvf->aligned) {
+				ERROR("Perhaps it's because this write needed to be aligned?\n");
+			}
+			PRINT_ERROR_NAME(errno);
+			assert(0);
+		}
+
+		DEBUG("Done extending NVFile.\n");
+	}
+	else
+	{
+		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->length);
+	}
+
+	
+	_bankshot2_fileops->PREAD(nvf->fd, buf, count, offset);
+	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
+}
+
 RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 {
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
@@ -1335,7 +1389,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 	ret = find_extent(nvf, &read_offset, &read_count);
 	if (ret == 0 || ret == 2) {
 		// Not fully in cache. Copy to cache first and add extent.
-//		void* result = copy_to_cache(INTF_PREAD);
+		copy_to_cache(nvf, buf, read_offset, read_count);
 
 		// Acquire node write lock for add_extent
 		NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
