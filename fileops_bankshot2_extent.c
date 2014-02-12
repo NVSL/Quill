@@ -64,7 +64,7 @@ void bankshot2_cleanup_extent_tree(struct NVNode *node)
 
 /* Find an extent in cache tree */
 /* Read lock of NVFile and NVNode must be held */
-int find_extent(struct NVFile *nvf, off_t offset, size_t count)
+int find_extent(struct NVFile *nvf, off_t *offset, size_t *count)
 {
 	struct NVNode *node = nvf->node;
 	rb_red_blk_node *x;
@@ -78,7 +78,7 @@ int find_extent(struct NVFile *nvf, off_t offset, size_t count)
 	if (x == nil)
 		return 0;
 
-	compVal = extent_rbtree_compare_find(x->key, offset);
+	compVal = extent_rbtree_compare_find(x->key, *offset);
 	while (compVal) {
 		if (compVal == 1)
 			x = x->left;
@@ -88,13 +88,20 @@ int find_extent(struct NVFile *nvf, off_t offset, size_t count)
 		if (x == nil)
 			return 0;
 
-		compVal = extent_rbtree_compare_find(x->key, offset);
+		compVal = extent_rbtree_compare_find(x->key, *offset);
 	}
 
 	// found a matching node, return relevant values
 	struct extent_cache_entry *current = x->key;
 
-	return 1;
+	// Fully covered
+	if (current->offset + current->count >= *offset + *count) {
+		return 1;
+	} else { // Partially covered
+		*count -= current->offset + current->count - *offset;
+		*offset = current->offset + current->count;
+		return 2;
+	}
 }
 
 /* Add an extent to cache tree */

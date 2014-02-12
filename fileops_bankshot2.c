@@ -1237,6 +1237,9 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 {
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
+	int ret = 0;
+	off_t read_offset;
+	size_t read_count;
 
 	ssize_t available_length = (nvf->node->length) - offset;
 
@@ -1320,32 +1323,37 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 	SANITYCHECK(nvf->node->length < nvf->node->maplength);
 
 	/* If request extent not in cache, we need to read it from backing store and copy to cache */
-//	if (!extent_in_cache(nvf, offset, count)) {
+	read_count = len_to_read;
+	read_offset = offset;
+	ret = find_extent(nvf, &read_offset, &read_count);
+	if (ret == 0 || ret == 2) {
+		// Not fully in cache. Copy to cache first and add extent.
 //		void* result = copy_to_cache(INTF_PREAD);
-//		insert_extent(nvf, offset, count);
-//	} else { // File extent already in cache. Just copy it to buf.
+		add_extent(nvf, offset, len_to_read, 0);
+	}
+
+	// File extent in cache. Just copy it to buf.
 #if TIME_READ_MEMCPY
 //	int cpu = get_cpuid();
-		uint64_t start_time = getcycles();
+	uint64_t start_time = getcycles();
 #endif
 
 #if NOSANITYCHECK
 #else
-		void* result =
+	void* result =
 #endif
 //		FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
-			memcpy1(buf, nvf->node->data+offset, len_to_read);
+		memcpy1(buf, nvf->node->data+offset, len_to_read);
 
 
 #if TIME_READ_MEMCPY
-		uint64_t end_time = getcycles();
-		total_memcpy_cycles += end_time - start_time;
+	uint64_t end_time = getcycles();
+	total_memcpy_cycles += end_time - start_time;
 //	if(cpu != get_cpuid()) {
 //		printf("cpuid changed\n");
 //		exit(1);
 //	}
 #endif
-//	}
 
 	SANITYCHECK(result == buf);
 	SANITYCHECK(result > 0);
