@@ -134,7 +134,6 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write)
 						- prev->offset;
 			}
 
-			free(newnode->key);
 			RBDelete(tree, newnode);
 
 			newnode = prenode;
@@ -158,7 +157,6 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write)
 
 				if (next->dirty)
 					new->dirty = next->dirty;
-				free(sucnode->key);
 				RBDelete(tree, sucnode);
 			} else {
 				break;
@@ -196,7 +194,6 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 		compVal = extent_rbtree_compare_find(x->key, offset);
 	}
 
-	free(x->key);
 	RBDelete(tree, x);
 	return;
 }
