@@ -469,7 +469,9 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 		oflag &= ~O_WRONLY;
 		oflag |= O_RDWR;
 	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
-		DEBUG_P("O_RDONLY ");
+		MSG("File mode O_RDONLY. For cache file add O_RDWR\n");
+		oflag &= ~O_RDONLY;
+		oflag |= O_RDWR;
 	}
 
 	struct stat file_st;
@@ -542,6 +544,7 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 //	node->length = file_st.st_size;
 	node->maplength = 0;
 	node->cache_serialno = file_st.st_ino;
+	node->cache_length = file_st.st_size;
 
 	bankshot2_setup_extent_tree(node);
 
@@ -582,12 +585,12 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 	}
 */
 	SANITYCHECK(nvf->node != NULL);
-	SANITYCHECK(nvf->node->length >= 0);
+	SANITYCHECK(nvf->node->cache_length >= 0);
 
-	if(FLAGS_INCLUDE(oflag, O_TRUNC) && nvf->node->length)
+	if(FLAGS_INCLUDE(oflag, O_TRUNC) && nvf->node->cache_length)
 	{
 		DEBUG("We just opened a file with O_TRUNC that was already open with nonzero length %li.  Updating length.\n", nvf->node->length);
-		nvf->node->length = 0;
+		nvf->node->cache_length = 0;
 	}
 /*
 	if(stat(path, &file_st)) // in case of multithreading it's good to update.  // TODO this is obviously a race condition...
@@ -596,7 +599,7 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 		assert(0);
 	}
 */
-	SANITYCHECK(nvf->node->length == file_st.st_size);
+	SANITYCHECK(nvf->node->cache_length == file_st.st_size);
 
 	DEBUG("Meh, why not allocate a new map every time\n");
 	//nvf->node->maplength = -1;
@@ -608,14 +611,14 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 	
 		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
 	MSG("Try to mmap file %s, fd %d, cache fd %d\n", path, nvf->fd, nvf->cache_fd);
-	if(_bankshot2_extend_map(nvf, MAX(1, nvf->node->length)))
+	if(_bankshot2_extend_map(nvf, MAX(1, nvf->node->cache_length)))
 	{
 		MSG("Failed to mmap cache fd %d. Don't cache it, just use Posix.\n");
 		return -1;
 	}
 
 	SANITYCHECK(nvf->node->maplength > 0);
-	SANITYCHECK(nvf->node->maplength > nvf->node->length);
+	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length);
 
 	if(nvf->node->data < 0) {
 		ERROR("Failed to mmap path %s: %s\n", path, strerror(errno));
@@ -625,8 +628,8 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 	MSG("mmap successful.  result: %p\n", nvf->node->data);
 //	}
 
-	SANITYCHECK(nvf->node->length >= 0);
-	SANITYCHECK(nvf->node->maplength > nvf->node->length);
+	SANITYCHECK(nvf->node->cache_length >= 0);
+	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length);
 
 	nvf->offset = (size_t*)calloc(1, sizeof(int));
 	*nvf->offset = 0;
@@ -1242,13 +1245,15 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 
 void copy_to_cache(struct NVFile *nvf, char *buf, off_t offset, size_t count)
 {
-	ssize_t extension = count + offset - (nvf->node->length) ;
+	ssize_t extension = count + offset - (nvf->node->cache_length) ;
+
+	DEBUG("%s: cache fd %d, offset %li, size %li\n", __func__, nvf->cache_fd, offset, count);
 
 	if(extension > 0)
 	{
 
 		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
-			count, nvf->node->length, offset, count, extension);
+			count, nvf->node->cache_length, offset, count, extension);
 		
 		if(offset + count >= nvf->node->maplength )
 		{
@@ -1286,7 +1291,7 @@ void copy_to_cache(struct NVFile *nvf, char *buf, off_t offset, size_t count)
 	}
 	else
 	{
-		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->length);
+		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->cache_length);
 	}
 
 	
@@ -1389,6 +1394,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 	ret = find_extent(nvf, &read_offset, &read_count);
 	if (ret == 0 || ret == 2) {
 		// Not fully in cache. Copy to cache first and add extent.
+		DEBUG("find_extent return %d, original offset %li, count %li, actual offset %li, count %li\n", ret, offset, len_to_read, read_offset, read_count);
 		copy_to_cache(nvf, buf, read_offset, read_count);
 
 		// Acquire node write lock for add_extent
