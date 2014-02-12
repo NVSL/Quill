@@ -37,19 +37,34 @@
 		return -1; \
 	} }while(0)
 
-
-
 struct NVFile
 {
-	void* datastart;
-	int p; // offset from datastart to R/W position
-	int length;
+	NVP_LOCK_DECL;
+	volatile bool valid;
+	int fd;
+	volatile size_t* offset;
 	bool canRead;
 	bool canWrite;
 	bool append;
-	int fd;
-	int prot;  // used for _bankshot2_remap
-	int flags; // used for _bankshot2_remap
+	bool aligned;
+	ino_t serialno; // duplicated so that iterating doesn't require following every node*
+	struct NVNode* node;
+	bool posix;	// Use Posix operations
+	int cache_fd;	// Cache file fd
+	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
+};
+
+struct NVNode
+{
+	ino_t serialno;
+	NVP_LOCK_DECL;
+	char* volatile data; // the pointer itself is volatile
+	volatile size_t length;
+	volatile size_t maplength;
+//	volatile int maxPerms;
+//	volatile int valid; // for debugging purposes
+	int cache_fd;	// Cache file fd
+	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
 };
 
 // declare and alias all the functions in ALLOPS

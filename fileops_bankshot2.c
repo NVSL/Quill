@@ -13,6 +13,8 @@
 #include "nvp_mman.h"
 #include "nvp_lock.h"
 
+#include "fileops_bankshot2.h"
+
 //#include "my_memcpy_nocache.h"
 
 // TODO: manual prefaulting sometimes segfaults
@@ -63,37 +65,6 @@ RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL);
 int MMAP_PAGE_SIZE;
 
 void* _bankshot2_zbuf; // holds all zeroes.  used for aligned file extending. TODO: does sharing this hurt performance?
-
-
-struct NVFile
-{
-	NVP_LOCK_DECL;
-	volatile bool valid;
-	int fd;
-	volatile size_t* offset;
-	bool canRead;
-	bool canWrite;
-	bool append;
-	bool aligned;
-	ino_t serialno; // duplicated so that iterating doesn't require following every node*
-	struct NVNode* node;
-	bool posix;	// Use Posix operations
-	int cache_fd;	// Cache file fd
-	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
-};
-
-struct NVNode
-{
-	ino_t serialno;
-	NVP_LOCK_DECL;
-	char* volatile data; // the pointer itself is volatile
-	volatile size_t length;
-	volatile size_t maplength;
-//	volatile int maxPerms;
-//	volatile int valid; // for debugging purposes
-	int cache_fd;	// Cache file fd
-	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
-};
 
 struct NVFile* _bankshot2_fd_lookup;
 
@@ -1360,10 +1331,10 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 	SANITYCHECK(nvf->node->length < nvf->node->maplength);
 
 	/* If request extent not in cache, we need to read it from backing store and copy to cache */
-	if (!extent_in_cache(nvf, offset, count)) {
-		void* result = copy_to_cache(INTF_PREAD);
-		insert_extent(nvf, offset, count);
-	} else { // File extent already in cache. Just copy it to buf.
+//	if (!extent_in_cache(nvf, offset, count)) {
+//		void* result = copy_to_cache(INTF_PREAD);
+//		insert_extent(nvf, offset, count);
+//	} else { // File extent already in cache. Just copy it to buf.
 #if TIME_READ_MEMCPY
 //	int cpu = get_cpuid();
 		uint64_t start_time = getcycles();
@@ -1385,7 +1356,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 //		exit(1);
 //	}
 #endif
-	}
+//	}
 
 	SANITYCHECK(result == buf);
 	SANITYCHECK(result > 0);
