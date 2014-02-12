@@ -77,6 +77,7 @@ struct NVNode
 //	volatile int valid; // for debugging purposes
 	int cache_fd;	// Cache file fd
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
+	int lock_id;
 	void *extent_tree;
 };
 

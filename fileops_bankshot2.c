@@ -1072,7 +1072,8 @@ RETT_READ _bankshot2_READ(INTF_READ)
 		return _bankshot2_fileops->READ(CALL_READ);
 	}
 
-	int cpuid = -1;
+	int cpuid = GET_CPUID();
+	nvf->node->lock_id = cpuid;
 
 	RETT_READ result = _bankshot2_check_read_size_valid(length);
 	if (result <= 0)
@@ -1117,7 +1118,9 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 	}
 
 	//int iter;
-	int cpuid = -1;
+	int cpuid = GET_CPUID();
+	nvf->node->lock_id = cpuid;
+
 	RETT_WRITE result = _bankshot2_check_write_size_valid(length);
 	if (result <= 0)
 		return result;
@@ -1177,7 +1180,9 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 	if (result <= 0)
 		return result;
 
-	int cpuid = -1;
+	int cpuid = GET_CPUID();
+	nvf->node->lock_id = cpuid;
+
 	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid);
@@ -1207,7 +1212,9 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 	if (result <= 0)
 		return result;
 	
-	int cpuid = -1;
+	int cpuid = GET_CPUID();
+	nvf->node->lock_id = cpuid;
+
 	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid);
@@ -1536,7 +1543,9 @@ RETT_SEEK64 _bankshot2_SEEK64(INTF_SEEK64)
 		return _bankshot2_fileops->SEEK64(CALL_SEEK64);
 	}
 
-	int cpuid = -1;
+	int cpuid = GET_CPUID();
+	nvf->node->lock_id = cpuid;
+
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid);
@@ -1624,7 +1633,9 @@ RETT_TRUNC64 _bankshot2_TRUNC64(INTF_TRUNC64)
 		return _bankshot2_fileops->TRUNC64(CALL_TRUNC64);
 	}
 
-	int cpuid = -1;
+	int cpuid = GET_CPUID();
+	nvf->node->lock_id = cpuid;
+
 	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);
 	NVP_LOCK_NODE_WR(nvf);
