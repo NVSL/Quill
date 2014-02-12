@@ -364,8 +364,6 @@ rb_red_blk_node* TreePredecessor(rb_red_blk_tree* tree, rb_red_blk_node* x) {
 /***********************************************************************/
 
 void InorderTreePrint(rb_red_blk_tree* tree, rb_red_blk_node* x) {
-  rb_red_blk_node* nil=tree->nil;
-  rb_red_blk_node* root=tree->root;
   if (x != tree->nil) {
     InorderTreePrint(tree,x->left);
     tree->PrintKey(x->key);
