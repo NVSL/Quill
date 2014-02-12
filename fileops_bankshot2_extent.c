@@ -1,3 +1,66 @@
+#include "red_black_tree.h"
+
+int extent_rbtree_compare(const void *left, const void *right)
+{
+	const struct extent_cache_entry *leftkey = left;
+	const struct extent_cache_entry *rightkey = right;
+
+	if (leftkey->offset < rightkey->offset) return -1;
+	if (leftkey->offset > rightkey->offset) return 1;
+
+	return 0;
+}
+
+int extent_rbtree_compare_find(const void *node, const off_t offset)
+{
+	const struct extent_cache_entry *nodekey = node;
+
+	if ((nodekey->offset <= offset) &&
+			(nodekey->offset + nodekey->count > offset))
+		return 0;
+
+	if (nodekey->offset < offset) return -1;
+	if (nodekey->offset > offset) return 1;
+
+	return 0;
+}
+
+void extent_rbtree_destroykey(void *key)
+{
+	free(key);
+}
+
+void extent_rbtree_destroyinfo(void *key)
+{
+}
+
+void extent_rbtree_printkey(void *key)
+{
+	const struct extent_cache_entry *current = key;
+	DEBUG("0x%.16llx to 0x%.16llx %d\n", current->offset,
+		current->offset + current->count, current->dirty);
+}
+
+void extent_rbtree_printinfo(void *key)
+{
+}
+
+void bankshot2_setup_extent_tree(struct NVNode *node)
+{
+	node->extent_tree = RBTreeCreate(
+		extent_rbtree_compare,
+		extent_rbtree_destroykey,
+		extent_rbtree_destroyinfo,
+		extent_rbtree_printkey,
+		extent_rbtree_printinfo
+	);
+}
+
+void bankshot2_cleanup_extent_tree(struct NVNode *node)
+{
+	RBTreeDestroy((rb_red_blk_tree *)(node->extent_tree));
+}
+
 /* Find an extent in cache tree */
 /* Read lock of NVFile and NVNode must be held */
 int find_extent(struct NVFile *nvf, off_t offset, size_t count)
