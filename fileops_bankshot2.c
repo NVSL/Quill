@@ -1297,6 +1297,12 @@ void copy_to_cache(struct NVFile *nvf, char *buf, off_t offset, size_t count)
 	
 	_bankshot2_fileops->PREAD(nvf->fd, buf, count, offset);
 	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
+
+	if(extension > 0) {
+		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->cache_length, nvf->node->cache_length + extension);
+		nvf->node->cache_length += extension;
+	}
+
 }
 
 RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
@@ -1501,13 +1507,13 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 	
 	if(nvf->append)
 	{
-		DEBUG("this fd (%i) is O_APPEND; setting offset from the passed value (%li) to the end of the file (%li) prior to writing anything\n", nvf->fd, offset, nvf->node->length);
-		offset = nvf->node->length;
+		DEBUG("this fd (%i) is O_APPEND; setting offset from the passed value (%li) to the end of the file (%li) prior to writing anything\n", nvf->fd, offset, nvf->node->cache_length);
+		offset = nvf->node->cache_length;
 	}
 
-	ssize_t extension = count + offset - (nvf->node->length) ;
+	ssize_t extension = count + offset - (nvf->node->cache_length) ;
 
-	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->length, offset, extension, count);
+	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->cache_length, offset, extension, count);
 	
 	if(extension > 0)
 	{
@@ -1516,7 +1522,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 		#endif
 
 		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
-			count, nvf->node->length, offset, count, extension);
+			count, nvf->node->cache_length, offset, count, extension);
 		
 		if( offset+count >= nvf->node->maplength )
 		{
@@ -1554,26 +1560,26 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 	}
 	else
 	{
-		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->length);
+		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->cache_length);
 	}
 
 	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p (%p+%li), %p, %li)\n", nvf->node->data+offset, nvf->node->data, offset, buf, count);
 	
 	if(extension > 0)
 	{
-		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, (nvf->node->length+extension));
-		SANITYCHECK( (nvf->node->length+extension) < nvf->node->maplength);
+		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, (nvf->node->cache_length+extension));
+		SANITYCHECK( (nvf->node->cache_length+extension) < nvf->node->maplength);
 	}
 	else
 	{
-		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, nvf->node->length);
-		SANITYCHECK( (nvf->node->length) < nvf->node->maplength);
+		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, nvf->node->cache_length);
+		SANITYCHECK( (nvf->node->cache_length) < nvf->node->maplength);
 	}
 
 	SANITYCHECK(nvf->valid);
 	SANITYCHECK(nvf->node != NULL);
 	SANITYCHECK(nvf->node->data != NULL);
-	SANITYCHECK(nvf->node->maplength > nvf->node->length + ((extension>0)?extension:0));
+	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length + ((extension>0)?extension:0));
 	SANITYCHECK(nvf->node->data+offset > 0);
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
@@ -1596,13 +1602,13 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
 
 	if(extension > 0) {
-		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->length, nvf->node->length + extension);
-		nvf->node->length += extension;
+		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->cache_length, nvf->node->cache_length + extension);
+		nvf->node->cache_length += extension;
 	}
 
 	//nvf->offset += count; // NOT IN PWRITE (this happens in write)
 
-	DEBUG("About to return from _bankshot2_PWRITE with ret val %li.  file len: %li, file off: %li, map len: %li, node %p\n", count, nvf->node->length, nvf->offset, nvf->node->maplength, nvf->node);
+	DEBUG("About to return from _bankshot2_PWRITE with ret val %li.  file len: %li, file off: %li, map len: %li, node %p\n", count, nvf->node->cache_length, nvf->offset, nvf->node->maplength, nvf->node);
 
 	DO_MSYNC(nvf);
 
