@@ -38,7 +38,7 @@ void extent_rbtree_destroyinfo(void *key)
 void extent_rbtree_printkey(const void *key)
 {
 	const struct extent_cache_entry *current = key;
-	DEBUG("0x%.16llx to 0x%.16llx %d\n", current->offset,
+	MSG("0x%.16llx to 0x%.16llx %d\n", current->offset,
 		current->offset + current->count, current->dirty);
 }
 
@@ -200,7 +200,7 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 
 /* Find the first extent in cache tree */
 /* Read lock of NVFile and NVNode must be held */
-int first_extent(struct NVFile *nvf, off_t *offset, size_t *count)
+int first_extent(struct NVFile *nvf, off_t *offset, size_t *count, int *dirty)
 {
 	struct NVNode *node = nvf->node;
 	rb_red_blk_node *x;
@@ -214,7 +214,7 @@ int first_extent(struct NVFile *nvf, off_t *offset, size_t *count)
 	if (x == nil)
 		return 0;
 
-	while (x->left)
+	while (x->left != nil)
 		x = x->left;
 
 	// found a matching node, return relevant values
@@ -222,6 +222,7 @@ int first_extent(struct NVFile *nvf, off_t *offset, size_t *count)
 
 	*count = current->count;
 	*offset = current->offset;
+	*dirty = current->dirty;
 
 	return 1;
 }

@@ -60,6 +60,7 @@ int _bankshot2_extend_map(struct NVFile *nvf, size_t newlen);
 int _bankshot2_test_mmap(int file, size_t newlen);
 void _bankshot2_SIGBUS_handler(int sig);
 void _bankshot2_test_invalidate_node(struct NVFile* nvf);
+void cache_write_back(struct NVFile *nvf);
 
 RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE); // like PWRITE, but without locks (called by _bankshot2_WRITE)
 RETT_PWRITE _bankshot2_do_pread (INTF_PREAD ); // like PREAD , but without locks (called by _bankshot2_READ )
@@ -1017,6 +1018,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_WR(nvf);
 
+	cache_write_back(nvf);
 	nvf->valid = 0;
 
 	//_bankshot2_test_invalidate_node(nvf);
@@ -1303,6 +1305,35 @@ void copy_to_cache(struct NVFile *nvf, char *buf, off_t offset, size_t count)
 		nvf->node->cache_length += extension;
 	}
 
+}
+
+void copy_from_cache(struct NVFile *nvf, off_t offset, size_t count)
+{
+	MSG("%s: cache fd %d, offset %li, size %li\n", __func__, nvf->cache_fd, offset, count);
+	
+	_bankshot2_fileops->PWRITE(nvf->fd, nvf->node->data, count, offset);
+
+}
+
+/* Write back the cache file to original file. */
+/* Write locks of NVFile and Node must be held. */
+void cache_write_back(struct NVFile *nvf)
+{
+	off_t write_offset;
+	size_t write_count;
+	int dirty;
+
+	MSG("%s: write back cache fd %d to fd %d\n", __func__,
+						nvf->cache_fd, nvf->fd);
+
+//	RBTreePrint(nvf->node->extent_tree);
+
+	while (first_extent(nvf, &write_offset, &write_count, &dirty) == 1)
+	{
+		if (dirty)
+			copy_from_cache(nvf, write_offset, write_count);
+		remove_extent(nvf, write_offset);
+	}
 }
 
 RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
