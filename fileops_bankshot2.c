@@ -1023,6 +1023,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 
 	//_bankshot2_test_invalidate_node(nvf);
 
+	_bankshot2_fileops->CLOSE(nvf->cache_fd);
 	RETT_CLOSE result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
 
 	NVP_UNLOCK_NODE_WR(nvf);
