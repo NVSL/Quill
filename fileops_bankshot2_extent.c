@@ -197,3 +197,31 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 	RBDelete(tree, x);
 	return;
 }
+
+/* Find the first extent in cache tree */
+/* Read lock of NVFile and NVNode must be held */
+int first_extent(struct NVFile *nvf, off_t *offset, size_t *count)
+{
+	struct NVNode *node = nvf->node;
+	rb_red_blk_node *x;
+	rb_red_blk_node *nil;
+	rb_red_blk_tree *tree = node->extent_tree;
+	int compVal;
+
+	x = tree->root->left;
+	nil = tree->nil;
+
+	if (x == nil)
+		return 0;
+
+	while (x->left)
+		x = x->left;
+
+	// found a matching node, return relevant values
+	struct extent_cache_entry *current = x->key;
+
+	*count = current->count;
+	*offset = current->offset;
+
+	return 1;
+}
