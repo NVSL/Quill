@@ -26,6 +26,7 @@
 #include <sys/uio.h>
 #include <dlfcn.h>
 #include <stdint.h>
+#include <sched.h>
 #include <ctype.h>
 #include "debug.h"
 
