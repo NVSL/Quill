@@ -450,7 +450,7 @@ static char* _bankshot2_get_cachefile_path(const char *path)
 }
 
 /* Open the cache file and mmap it. We're holding NVF lock and node lock. */
-static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
+static int _bankshot2_open_cache_file(char *path, int oflag, int mode,
 					struct NVFile *nvf)
 {
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
@@ -461,9 +461,9 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 		return -1;
 	}
 	
-	DEBUG("_bankshot2_Open_cache_file(%s)\n", path);
+	DEBUG("_bankshot2_Open_cache_file for %s\n", path);
 	
-	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
+	if((oflag & O_RDWR)||((oflag & O_RDONLY)&&(oflag & O_WRONLY))) {
 		DEBUG_P("O_RDWR ");
 	} else if(FLAGS_INCLUDE(oflag,O_WRONLY)) {
 		MSG("File mode O_WRONLY. For cache file add O_RDWR\n");
@@ -475,6 +475,7 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 		oflag |= O_RDWR;
 	}
 
+# if 0
 	struct stat file_st;
 
 	if(access(path, F_OK)) // file doesn't exist
@@ -508,8 +509,9 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 			assert(S_ISREG(file_st.st_mode));
 		}
 	}
-
+#endif
 	int result;
+	struct bankshot2_cache_data data;
 
 	struct NVNode* node = nvf->node;
 
@@ -518,20 +520,28 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 		assert(0);
 	}
 
-	result = _bankshot2_fileops->OPEN(path, oflag & (~O_APPEND), mode);
+	data.file = nvf->fd;
+//	data.offset = 0;
+//	data.size = 4096;
+	data.cache_ino = 0;
+	data.read = nvf->canRead ? 1 : 0;
+	data.write = nvf->canWrite ? 1 : 0;
+
+//	result = _bankshot2_fileops->OPEN(path, oflag & (~O_APPEND), mode);
+	result = ioctl(bs2_ctrl_fd,_BANKSHOT2_IOCTL_GET_INODE, &data);
 
 	if(result<0)
 	{
-		DEBUG("_bankshot2_open_cache_file->%s_OPEN failed: %s\n", _bankshot2_fileops->name, strerror(errno));
+		DEBUG("IOCTL_GET_INODE failed: %d\n", result);
 		return result;
 	}	
 
-	MSG("_bankshot2_open_cache_file succeeded for path %s: fd %i returned.  filling in file info\n", path, result);
+	MSG("_bankshot2_open_cache_file succeeded for path %s: fd %lu returned.\n", path, data.cache_ino);
 
-	SANITYCHECK(!access(path, F_OK)); // file exists
+//	SANITYCHECK(!access(path, F_OK)); // file exists
 //	if(FLAGS_INCLUDE(oflag, O_RDONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, R_OK)); } else { DEBUG("Read not requested\n"); }
 //	if(FLAGS_INCLUDE(oflag, O_WRONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, W_OK)); } else { DEBUG("Write not requested\n"); }
-
+#if 0
 	if(stat(path, &file_st))
 	{
 		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
@@ -541,25 +551,26 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 	{
 		DEBUG("Stat successful for newly opened file %s (fd %i)\n", path, result);
 	}
+#endif
 
 //	node->length = file_st.st_size;
 	node->maplength = 0;
-	node->cache_serialno = file_st.st_ino;
-	node->cache_length = file_st.st_size;
+	node->cache_serialno = data.cache_ino;
+	node->cache_length = data.cache_file_size;
 
 	bankshot2_setup_extent_tree(node);
 
-	nvf->cache_fd = result;
+//	nvf->cache_fd = result;
 	
-	nvf->cache_serialno = file_st.st_ino;
+	nvf->cache_serialno = data.cache_ino;
 
 	// Set FD permissions
 	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
-		DEBUG("oflag (%i) specifies O_RDWR for fd %i\n", oflag, result);
+		DEBUG("oflag (%i) specifies O_RDWR\n", oflag);
 		nvf->canRead = 1;
 		nvf->canWrite = 1;
 	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
-		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n", oflag, result);
+		DEBUG("oflag (%i) specifies O_RDONLY\n", oflag);
 		nvf->canRead = 1;
 		nvf->canWrite = 0;
 	} else {
@@ -600,7 +611,7 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 		assert(0);
 	}
 */
-	SANITYCHECK(nvf->node->cache_length == file_st.st_size);
+	SANITYCHECK(nvf->node->cache_length == data.cache_file_size);
 
 	DEBUG("Meh, why not allocate a new map every time\n");
 	//nvf->node->maplength = -1;
@@ -611,7 +622,7 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 //		_bankshot2_extend_map(nvf->fd, nvf->node->length);
 	
 		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
-	MSG("Try to mmap file %s, fd %d, cache fd %d\n", path, nvf->fd, nvf->cache_fd);
+	MSG("Try to mmap file %s, fd %d, cache inode %lu\n", path, nvf->fd, nvf->cache_serialno);
 	if(_bankshot2_extend_map(nvf, MAX(1, nvf->node->cache_length)))
 	{
 		MSG("Failed to mmap cache fd %d. Don't cache it, just use Posix.\n");
@@ -647,14 +658,12 @@ static int _bankshot2_open_cache_file(const char *path, int oflag, int mode,
 	DO_MSYNC(nvf);
 
 	errno = 0;
-	return nvf->cache_fd;
+	return nvf->cache_serialno;
 }
 
 RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 {
-	char *path_to_cachefile;
 	int mode = 0;
-	int skip_mmap_test = 0;
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
@@ -938,8 +947,8 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	DEBUG("Meh, why not allocate a new map every time\n");
 	//nvf->node->maplength = -1;
 
-	path_to_cachefile = _bankshot2_get_cachefile_path(path);
-	MSG("Cache filename: %s\n", path_to_cachefile);
+//	path_to_cachefile = _bankshot2_get_cachefile_path(path);
+//	MSG("Cache filename: %s\n", path_to_cachefile);
 
 //	if(nvf->node->maplength < nvf->node->length)
 //	{
@@ -948,6 +957,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	
 		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
 //	if(_bankshot2_extend_map(nvf->fd, MAX(1, nvf->node->length)))
+#if 0
 	if(skip_mmap_test == 0 && _bankshot2_test_mmap(nvf->fd, MAX(1, nvf->node->length)))
 	{
 		MSG("Failed to mmap fd %d. Don't cache it, just use Posix.\n");
@@ -957,9 +967,10 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		nvf->posix = 1;
 		return nvf->fd;
 	}
+#endif
 
-	if (_bankshot2_open_cache_file(path_to_cachefile, oflag, mode, nvf) < 0) {
-		ERROR("Open Cache File %s for %s failed!\n", path_to_cachefile, path);
+	if (_bankshot2_open_cache_file(path, flag, mode, nvf) < 0) {
+		ERROR("Open Cache File for %s failed!\n", path);
 		assert(0);
 	}
 
@@ -995,7 +1006,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	NVP_UNLOCK_FD_WR(nvf);
 
 	errno = 0;
-	free(path_to_cachefile);
+//	free(path_to_cachefile);
 	return nvf->fd;
 }
 
