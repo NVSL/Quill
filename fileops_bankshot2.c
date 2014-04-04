@@ -1229,9 +1229,12 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 void copy_to_cache(struct NVFile *nvf, char *buf, off_t offset, size_t count)
 {
 	ssize_t extension = count + offset - (nvf->node->cache_length) ;
+	struct bankshot2_cache_data data;
+	int result;
 
-	DEBUG("%s: cache fd %d, offset %li, size %li\n", __func__, nvf->cache_fd, offset, count);
+	DEBUG("%s: cache inode %lu, offset %li, size %li\n", __func__, nvf->cache_serialno, offset, count);
 
+#if 0
 	if(extension > 0)
 	{
 
@@ -1276,10 +1279,25 @@ void copy_to_cache(struct NVFile *nvf, char *buf, off_t offset, size_t count)
 	{
 		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->cache_length);
 	}
+# endif
+	data.file = nvf->fd;
+	data.offset = offset;
+	data.size = count;
+	data.buf = buf;
+	data.cache_ino = nvf->cache_serialno;
+	data.rnw = READ_EXTENT;
+	data.read = (data.rnw == READ_EXTENT);
+	data.write = (data.rnw == WRITE_EXTENT);
 
+	result = ioctl(bankshot2_ctrl_fd, BANKSHOT2_IOCTL_CACHE_DATA, &data);
+	if (result < 0) {
+		ERROR("ioctl cache data read failed %d\n", result);
+		assert(0);
+	}
+
+//	_bankshot2_fileops->PREAD(nvf->fd, buf, count, offset);
+//	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
 	
-	_bankshot2_fileops->PREAD(nvf->fd, buf, count, offset);
-	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
 
 	if(extension > 0) {
 		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->cache_length, nvf->node->cache_length + extension);
@@ -1290,9 +1308,27 @@ void copy_to_cache(struct NVFile *nvf, char *buf, off_t offset, size_t count)
 
 void copy_from_cache(struct NVFile *nvf, off_t offset, size_t count)
 {
-	MSG("%s: cache fd %d, offset %li, size %li\n", __func__, nvf->cache_fd, offset, count);
+	struct bankshot2_cache_data data;
+	int result;
+
+	MSG("%s: cache inode %lu, offset %li, size %li\n", __func__, nvf->cache_serialno, offset, count);
 	
-	_bankshot2_fileops->PWRITE(nvf->fd, nvf->node->data, count, offset);
+	data.file = nvf->fd;
+	data.offset = offset;
+	data.size = count;
+//	data.buf = buf; FIXME
+	data.cache_ino = nvf->cache_serialno;
+	data.rnw = WRITE_EXTENT;
+	data.read = (data.rnw == READ_EXTENT);
+	data.write = (data.rnw == WRITE_EXTENT);
+
+	result = ioctl(bankshot2_ctrl_fd, BANKSHOT2_IOCTL_CACHE_DATA, &data);
+	if (result < 0) {
+		ERROR("ioctl cache data write failed %d\n", result);
+		assert(0);
+	}
+
+//	_bankshot2_fileops->PWRITE(nvf->fd, nvf->node->data, count, offset);
 
 }
 
