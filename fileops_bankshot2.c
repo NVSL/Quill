@@ -1252,6 +1252,7 @@ void copy_to_cache(struct NVFile *nvf, char *buf, int read, off_t offset,
 
 //	_bankshot2_fileops->PREAD(nvf->fd, buf, count, offset);
 //	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
+	*mmap_addr = data.mmap_addr;
 
 	if(extension > 0) {
 		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->cache_length, nvf->node->cache_length + extension);
