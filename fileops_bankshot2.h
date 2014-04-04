@@ -88,6 +88,7 @@ struct extent_cache_entry
 	off_t offset;
 	size_t count;
 	int dirty;
+	unsigned long mmap_addr;
 	struct extent_cache_entry *next;
 };
 
@@ -102,9 +103,12 @@ int _bankshot2_remap(struct NVFile* file, int newLength);
 
 void bankshot2_setup_extent_tree(struct NVNode *node);
 void bankshot2_cleanup_extent_tree(struct NVNode *node);
-int find_extent(struct NVFile *nvf, off_t *offset, size_t *count);
+int find_extent(struct NVFile *nvf, off_t *offset, size_t *count,
+			unsigned long *mmap_addr);
 void remove_extent(struct NVFile *nvf, off_t offset);
-void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write);
-int first_extent(struct NVFile *nvf, off_t *offset, size_t *count, int *dirty);
+void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write,
+			unsigned long mmap_addr);
+int first_extent(struct NVFile *nvf, off_t *offset, size_t *count, int *dirty,
+			unsigned long *mmap_addr);
 
 

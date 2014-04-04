@@ -64,7 +64,8 @@ void bankshot2_cleanup_extent_tree(struct NVNode *node)
 
 /* Find an extent in cache tree */
 /* Read lock of NVFile and NVNode must be held */
-int find_extent(struct NVFile *nvf, off_t *offset, size_t *count)
+int find_extent(struct NVFile *nvf, off_t *offset, size_t *count,
+			unsigned long *mmap_addr)
 {
 	struct NVNode *node = nvf->node;
 	rb_red_blk_node *x;
@@ -96,17 +97,24 @@ int find_extent(struct NVFile *nvf, off_t *offset, size_t *count)
 
 	// Fully covered
 	if (current->offset + current->count >= *offset + *count) {
+		*mmap_addr = current->mmap_addr;
+		*offset = current->offset;
+		*count = current->count;
 		return 1;
 	} else { // Partially covered
-		*count -= current->offset + current->count - *offset;
-		*offset = current->offset + current->count;
+//		*count -= current->offset + current->count - *offset;
+//		*offset = current->offset + current->count;
+		*mmap_addr = current->mmap_addr;
+		*offset = current->offset;
+		*count = current->count;
 		return 2;
 	}
 }
 
 /* Add an extent to cache tree */
 /* Must hold Write lock of NVNode */
-void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write)
+void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write,
+			unsigned long mmap_addr)
 {
 	struct NVNode *node = nvf->node;
 	struct extent_cache_entry *new;
@@ -122,12 +130,14 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write)
 	new->dirty = write; 
 	new->next = NULL;
 	new->dirty = write;
+	new->mmap_addr = mmap_addr;
 
 	newnode = RBTreeInsert(tree, new, NULL);
 	prenode = TreePredecessor(tree, newnode);
 	if (prenode != tree->nil) {
 		struct extent_cache_entry *prev = prenode->key;
-		if (prev->offset + prev->count >= new->offset) {
+		if ((prev->offset + prev->count >= new->offset) &&
+		    (prev->mmap_addr + (new->offset - prev->offset) == new->mmap_addr)) {
 			if (prev->offset + prev->count
 					< new->offset + new->count) {
 				prev->count = new->offset + new->count
@@ -148,7 +158,8 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write)
 		rb_red_blk_node *sucnode = TreeSuccessor(tree, newnode);
 		if (sucnode != tree->nil) {
 			struct extent_cache_entry *next = sucnode->key;
-			if (new->offset + new->count >= next->offset) {
+			if ((new->offset + new->count >= next->offset) &&
+		 	    (new->mmap_addr + (next->offset - new->offset) == next->mmap_addr)) {
 				if (next->offset + next->count
 						> new->offset + new->count) {
 					new->count = next->offset + next->count
@@ -200,13 +211,14 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 
 /* Find the first extent in cache tree */
 /* Read lock of NVFile and NVNode must be held */
-int first_extent(struct NVFile *nvf, off_t *offset, size_t *count, int *dirty)
+int first_extent(struct NVFile *nvf, off_t *offset, size_t *count, int *dirty,
+				unsigned long *mmap_addr)
 {
 	struct NVNode *node = nvf->node;
 	rb_red_blk_node *x;
 	rb_red_blk_node *nil;
 	rb_red_blk_tree *tree = node->extent_tree;
-	int compVal;
+//	int compVal;
 
 	x = tree->root->left;
 	nil = tree->nil;
@@ -223,6 +235,7 @@ int first_extent(struct NVFile *nvf, off_t *offset, size_t *count, int *dirty)
 	*count = current->count;
 	*offset = current->offset;
 	*dirty = current->dirty;
+	*mmap_addr = current->mmap_addr;
 
 	return 1;
 }
