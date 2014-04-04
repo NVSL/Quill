@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
 
 #include "perfcount.h"
 
