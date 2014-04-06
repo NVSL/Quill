@@ -1245,7 +1245,8 @@ void copy_to_cache(struct NVFile *nvf, char *buf, int read, off_t offset,
 	struct bankshot2_cache_data data;
 	int result;
 
-	DEBUG("%s: cache inode %lu, offset %li, size %li\n", __func__, nvf->cache_serialno, offset, count);
+	DEBUG("copy_to_cache: %s, cache inode %d, offset %li, size %li\n", read ? "read" : "write",
+			nvf->cache_serialno, offset, count);
 
 	data.file = nvf->fd;
 	data.offset = offset;
@@ -1551,7 +1552,8 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 	ssize_t extension = count + offset - (nvf->node->cache_length) ;
 
 	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->cache_length, offset, extension, count);
-	
+
+	extension = 0;
 	if(extension > 0)
 	{
 		#if COUNT_EXTENDS
@@ -1610,13 +1612,13 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 	else
 	{
 		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, nvf->node->cache_length);
-		SANITYCHECK( (nvf->node->cache_length) < nvf->node->maplength);
+//		SANITYCHECK( (nvf->node->cache_length) < nvf->node->maplength);
 	}
 
 	SANITYCHECK(nvf->valid);
 	SANITYCHECK(nvf->node != NULL);
 	SANITYCHECK(nvf->node->data != NULL);
-	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length + ((extension>0)?extension:0));
+//	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length + ((extension>0)?extension:0));
 	SANITYCHECK(nvf->node->data+offset > 0);
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
@@ -1624,7 +1626,9 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 	/* If request extent not in cache, we need to add extent */
 	write_count = count;
 	write_offset = offset;
+	DEBUG("Looking for extent offset %d, size %d\n", write_offset, write_count);
 	ret = find_extent(nvf, &write_offset, &write_count, &mmap_addr);
+	DEBUG("Looking for extent returned %d\n", ret);
 	if (ret == 0 || ret == 2) {
 		// Not fully in cache. Add extent.
 		new_buf = (char *)buf;
