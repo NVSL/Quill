@@ -65,7 +65,7 @@ void _bankshot2_SIGBUS_handler(int sig);
 void _bankshot2_test_invalidate_node(struct NVFile* nvf);
 void cache_write_back(struct NVFile *nvf);
 
-RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE); // like PWRITE, but without locks (called by _bankshot2_WRITE)
+RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE); // like PWRITE, but without locks (called by _bankshot2_WRITE)
 RETT_PWRITE _bankshot2_do_pread (INTF_PREAD ); // like PREAD , but without locks (called by _bankshot2_READ )
 RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_write
 
@@ -1127,7 +1127,7 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid); //TODO
 
-	result = _bankshot2_do_pwrite(CALL_WRITE, __sync_fetch_and_add(nvf->offset, length));
+	result = _bankshot2_do_pwrite(0, CALL_WRITE, __sync_fetch_and_add(nvf->offset, length));
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 
@@ -1224,12 +1224,12 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 		NVP_LOCK_NODE_WR(nvf);
 		
-		result = _bankshot2_do_pwrite(CALL_PWRITE);
+		result = _bankshot2_do_pwrite(1, CALL_PWRITE);
 
 		NVP_UNLOCK_NODE_WR(nvf);
 	}
 	else {
-		result = _bankshot2_do_pwrite(CALL_PWRITE);
+		result = _bankshot2_do_pwrite(0, CALL_PWRITE);
 		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	}
 
@@ -1481,7 +1481,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 }
 
 
-RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
+RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 {
 	int ret = 0;
 	off_t write_offset;
@@ -1645,11 +1645,15 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE)
 		if (mmap_addr == 0)
 			assert(0);
 		// Acquire node write lock for add_extent
-		NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-		NVP_LOCK_NODE_WR(nvf);
+		if (!wr_lock) {
+			NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+			NVP_LOCK_NODE_WR(nvf);
+		}
 		add_extent(nvf, offset, count, 1, mmap_addr);
-		NVP_UNLOCK_NODE_WR(nvf);
-		NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+		if (!wr_lock) {
+			NVP_UNLOCK_NODE_WR(nvf);
+			NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+		}
 		DO_MSYNC(nvf);
 
 		return count;
