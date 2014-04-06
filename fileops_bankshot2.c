@@ -372,13 +372,13 @@ void _bankshot2_init2(void)
 	#if TIME_READ_MEMCPY
 	atexit(report_memcpy_usec);
 	#endif
-
+#if 0
 	cache_path = getenv("CACHE_PATH");      
 	if (!cache_path) {
 		ERROR("Invalid cache path.\n");
 		assert(0);
 	}
-
+#endif
 	_bankshot2_write_pwrite_lock_handoff = 0;
 
 	assert(!posix_memalign(((void**)&_bankshot2_zbuf), 4096, 4096));
@@ -409,11 +409,13 @@ void _bankshot2_init2(void)
 	*/
 
 //	_bankshot2_debug_handoff();
-	bankshot2_ctrl_fd = open(bankshot2_ctrl_dev, O_RDWR);
+#if 0
+	bankshot2_ctrl_fd = _bankshot2_fileops->OPEN(bankshot2_ctrl_dev, O_RDWR);
 	if (!bankshot2_ctrl_fd) {
 		ERROR("Failed to open bankshot2 ctrl dev.\n");
 		assert(0);
 	}
+#endif
 }
 
 #if COUNT_EXTENDS
@@ -471,7 +473,7 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 		return -1;
 	}
 	
-	DEBUG("_bankshot2_Open_cache_file for %s\n", path);
+	DEBUG("_bankshot2_get_cache_inode for %s\n", path);
 
 # if 0
 	struct stat file_st;
@@ -525,8 +527,10 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	data.read = nvf->canRead ? 1 : 0;
 	data.write = nvf->canWrite ? 1 : 0;
 
+	DEBUG("Send IOCTL_GET_INODE request\n");
 //	result = _bankshot2_fileops->OPEN(path, oflag & (~O_APPEND), mode);
-	result = ioctl(bankshot2_ctrl_fd, BANKSHOT2_IOCTL_GET_INODE, &data);
+	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
+					BANKSHOT2_IOCTL_GET_INODE, &data);
 
 	if(result<0)
 	{
@@ -644,7 +648,15 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	}
 	
 	DEBUG("_bankshot2_OPEN(%s)\n", path);
-	
+
+	if (!bankshot2_ctrl_fd) {
+		bankshot2_ctrl_fd = _bankshot2_fileops->OPEN(bankshot2_ctrl_dev,
+								O_RDWR);
+		if (!bankshot2_ctrl_fd) {
+			ERROR("Failed to open bankshot2 ctrl dev.\n");
+			assert(0);
+		}
+	}
 	DEBUG("Attempting to _bankshot2_OPEN the file \"%s\" with the following flags (0x%X): ", path, oflag);
 
 	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
@@ -1244,7 +1256,8 @@ void copy_to_cache(struct NVFile *nvf, char *buf, int read, off_t offset,
 	data.read = (data.rnw == READ_EXTENT);
 	data.write = (data.rnw == WRITE_EXTENT);
 
-	result = ioctl(bankshot2_ctrl_fd, BANKSHOT2_IOCTL_CACHE_DATA, &data);
+	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
+					BANKSHOT2_IOCTL_CACHE_DATA, &data);
 	if (result < 0) {
 		ERROR("ioctl cache data read failed %d\n", result);
 		assert(0);
@@ -1278,7 +1291,8 @@ void copy_from_cache(struct NVFile *nvf, off_t offset, size_t count,
 	data.read = (data.rnw == READ_EXTENT);
 	data.write = (data.rnw == WRITE_EXTENT);
 
-	result = ioctl(bankshot2_ctrl_fd, BANKSHOT2_IOCTL_CACHE_DATA, &data);
+	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
+					BANKSHOT2_IOCTL_CACHE_DATA, &data);
 	if (result < 0) {
 		ERROR("ioctl cache data write failed %d\n", result);
 		assert(0);
