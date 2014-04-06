@@ -63,7 +63,7 @@ struct NVFile
 	ino_t serialno; // duplicated so that iterating doesn't require following every node*
 	struct NVNode* node;
 	bool posix;	// Use Posix operations
-	int cache_fd;	// Cache file fd
+//	int cache_fd;	// Cache file fd
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
 };
 

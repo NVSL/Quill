@@ -1015,7 +1015,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 
 	//_bankshot2_test_invalidate_node(nvf);
 
-	_bankshot2_fileops->CLOSE(nvf->cache_fd);
+//	_bankshot2_fileops->CLOSE(nvf->cache_fd);
 	RETT_CLOSE result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
 
 	NVP_UNLOCK_NODE_WR(nvf);
@@ -1313,7 +1313,7 @@ void cache_write_back(struct NVFile *nvf)
 	unsigned long mmap_addr;
 
 	MSG("%s: write back cache fd %d to fd %d\n", __func__,
-						nvf->cache_fd, nvf->fd);
+						nvf->fd, nvf->fd);
 
 //	RBTreePrint(nvf->node->extent_tree);
 
@@ -1555,7 +1555,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 
 	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->cache_length, offset, extension, count);
 
-	extension = 0;
+//	extension = 0;
 	if(extension > 0)
 	{
 		#if COUNT_EXTENDS
@@ -1568,7 +1568,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 		if( offset+count >= nvf->node->maplength )
 		{
 			DEBUG("Request will also extend map; doing that before extending file.\n");
-			_bankshot2_extend_map(nvf, offset+count );
+//			_bankshot2_extend_map(nvf, offset+count );
 		} else {
 			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->maplength, offset+count);
 			SANITYCHECK(nvf->node->maplength > (offset+count));
@@ -1580,11 +1580,11 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 
 		ssize_t temp_result;
 		if(nvf->aligned) {
-			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _bankshot2_fileops->name, nvf->cache_fd, _bankshot2_zbuf, 512, count+offset-512);
-			temp_result = _bankshot2_fileops->PWRITE(nvf->cache_fd, _bankshot2_zbuf, 512, count + offset - 512);
+			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _bankshot2_fileops->name, nvf->fd, _bankshot2_zbuf, 512, count+offset-512);
+			temp_result = _bankshot2_fileops->PWRITE(nvf->fd, _bankshot2_zbuf, 512, count + offset - 512);
 		} else {
 			DEBUG_P("(unaligned)\n");
-			temp_result = _bankshot2_fileops->PWRITE(nvf->cache_fd, "\0", 1, count + offset - 1);
+			temp_result = _bankshot2_fileops->PWRITE(nvf->fd, "\0", 1, count + offset - 1);
 		}	
 
 		if(temp_result != ((nvf->aligned)?512:1))
@@ -1614,7 +1614,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	else
 	{
 		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, nvf->node->cache_length);
-//		SANITYCHECK( (nvf->node->cache_length) < nvf->node->maplength);
+		SANITYCHECK( (nvf->node->cache_length) < nvf->node->maplength);
 	}
 
 	SANITYCHECK(nvf->valid);
@@ -1929,7 +1929,7 @@ RETT_DUP _bankshot2_DUP(INTF_DUP)
 	if (nvf->posix) {
 		DEBUG("Call posix DUP for fd %d\n", nvf->fd);
 		nvf2->posix = nvf->posix;
-		nvf2->cache_fd = nvf->cache_fd;
+//		nvf2->cache_fd = nvf->cache_fd;
 		NVP_UNLOCK_NODE_WR(nvf);
 		NVP_UNLOCK_FD_WR(nvf);
 		return result;
@@ -1956,7 +1956,7 @@ RETT_DUP _bankshot2_DUP(INTF_DUP)
 	nvf2->serialno 	= nvf->serialno;
 	nvf2->node 	= nvf->node;
 	nvf2->posix 	= nvf->posix;
-	nvf2->cache_fd	= nvf->cache_fd;
+//	nvf2->cache_fd	= nvf->cache_fd;
 
 	SANITYCHECK(nvf2->node != NULL);
 
@@ -1990,6 +1990,7 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	struct NVFile* nvf2 = &_bankshot2_fd_lookup[fd2];
 
+#if 0
 	/* We want to DUP the cache fd actually */
 	file = nvf->cache_fd;
 
@@ -1998,13 +1999,14 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 		DEBUG("Input and output files were the same (%i)\n", file);
 		return file;
 	}
+#endif
 
 	if (nvf->posix) {
 		DEBUG("Call posix DUP2 for fd %d\n", nvf->fd);
 		nvf2->posix = nvf->posix;
 		int result = _bankshot2_fileops->DUP2(CALL_DUP2);
 		nvf2->fd = result;
-		nvf2->cache_fd = nvf->cache_fd;
+//		nvf2->cache_fd = nvf->cache_fd;
 		return result;
 	}
 
@@ -2089,7 +2091,7 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	nvf2->node = nvf->node;
 	nvf2->valid = nvf->valid;
 	nvf2->posix = nvf->posix;
-	nvf2->cache_fd = nvf->cache_fd;
+//	nvf2->cache_fd = nvf->cache_fd;
 
 	SANITYCHECK(nvf2->node != NULL);
 	SANITYCHECK(nvf2->valid);
@@ -2168,11 +2170,11 @@ static int _bankshot2_get_fd_with_max_perms(struct NVFile *nvf, int file, int *m
 
 int _bankshot2_extend_map(struct NVFile *nvf, size_t newcharlen)
 {
-	int file = nvf->cache_fd;
+	int file = nvf->fd;
 
 	size_t newmaplen = (newcharlen/MMAP_PAGE_SIZE + 1)*MMAP_PAGE_SIZE;
 
-	DEBUG("Extend mapping for fd %d, cache fd %d\n", nvf->fd, nvf->cache_fd);
+	DEBUG("Extend mapping for fd %d, cache fd %d\n", nvf->fd, nvf->fd);
 
 #if TIME_EXTEND
 	struct timeval start;
@@ -2272,8 +2274,8 @@ int _bankshot2_extend_map(struct NVFile *nvf, size_t newcharlen)
 
 	if( result == MAP_FAILED || result == NULL )
 	{
-		MSG("mmap failed for fd %i: %s\n", nvf->cache_fd, strerror(errno));
-		MSG("Use posix operations for fd %i instead.\n", nvf->cache_fd);
+		MSG("mmap failed for fd %i: %s\n", nvf->fd, strerror(errno));
+		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
 		nvf->posix = 1;
 		return 0;
 	}
