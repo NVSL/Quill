@@ -1420,7 +1420,9 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 	/* If request extent not in cache, we need to read it from backing store and copy to cache */
 	read_count = len_to_read;
 	read_offset = offset;
+	DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, read_count);
 	ret = find_extent(nvf, &read_offset, &read_count, &mmap_addr);
+	DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, read_count);
 	if (ret == 0 || ret == 2) {
 		// Not fully in cache. Copy to cache first and add extent.
 		if (ret == 2) {
@@ -1626,9 +1628,9 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	/* If request extent not in cache, we need to add extent */
 	write_count = count;
 	write_offset = offset;
-	DEBUG("Looking for extent offset %d, size %d\n", write_offset, write_count);
+	DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, write_count);
 	ret = find_extent(nvf, &write_offset, &write_count, &mmap_addr);
-	DEBUG("Looking for extent returned %d\n", ret);
+	DEBUG("Pwrite: looking for extent returned %d\n", ret);
 	if (ret == 0 || ret == 2) {
 		// Not fully in cache. Add extent.
 		new_buf = (char *)buf;
