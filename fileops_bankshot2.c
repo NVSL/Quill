@@ -538,7 +538,7 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 		return result;
 	}	
 
-	MSG("_bankshot2_get_cache_inode succeeded for path %s: fd %lu returned.\n", path, data.cache_ino);
+	printf("_bankshot2_get_cache_inode succeeded for path %s: fd %llu returned.\n", path, data.cache_ino);
 
 //	SANITYCHECK(!access(path, F_OK)); // file exists
 //	if(FLAGS_INCLUDE(oflag, O_RDONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, R_OK)); } else { DEBUG("Read not requested\n"); }
