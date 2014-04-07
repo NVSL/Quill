@@ -1268,11 +1268,12 @@ void copy_to_cache(struct NVFile *nvf, char *buf, int read, off_t offset,
 //	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
 	*mmap_addr = data.mmap_addr;
 
+#if 0
 	if(extension > 0) {
 		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->cache_length, nvf->node->cache_length + extension);
 		nvf->node->cache_length += extension;
 	}
-
+#endif
 }
 
 void copy_from_cache(struct NVFile *nvf, off_t offset, size_t count,
