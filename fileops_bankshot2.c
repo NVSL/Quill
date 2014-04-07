@@ -1656,17 +1656,18 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 			NVP_UNLOCK_NODE_WR(nvf);
 			NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
 		}
-		DO_MSYNC(nvf);
 
-		return count;
+		goto extend;
 	}
 
 //	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
 	FSYNC_MEMCPY((char *)(mmap_addr + offset - write_offset), buf, count);
 
+extend:
 	if(extension > 0) {
 		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->cache_length, nvf->node->cache_length + extension);
 		nvf->node->cache_length += extension;
+		nvf->node->length += extension;
 	}
 
 	//nvf->offset += count; // NOT IN PWRITE (this happens in write)
