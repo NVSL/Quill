@@ -1010,7 +1010,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_WR(nvf);
 
-//	cache_write_back(nvf);
+	cache_write_back(nvf);
 	nvf->valid = 0;
 
 	//_bankshot2_test_invalidate_node(nvf);
@@ -1241,7 +1241,7 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 void copy_to_cache(struct NVFile *nvf, char *buf, int read, off_t offset,
 			size_t count, unsigned long *mmap_addr)
 {
-	ssize_t extension = count + offset - (nvf->node->cache_length) ;
+//	ssize_t extension = count + offset - (nvf->node->cache_length) ;
 	struct bankshot2_cache_data data;
 	int result;
 
@@ -1263,6 +1263,8 @@ void copy_to_cache(struct NVFile *nvf, char *buf, int read, off_t offset,
 		ERROR("ioctl cache data read failed %d\n", result);
 		assert(0);
 	}
+
+	// Doesn't need memcpy; it's done in kernel space
 
 //	_bankshot2_fileops->PREAD(nvf->fd, buf, count, offset);
 //	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
@@ -1304,6 +1306,12 @@ void copy_from_cache(struct NVFile *nvf, off_t offset, size_t count,
 
 }
 
+inline void cache_write_back_extent(struct NVFile *nvf, off_t offset, size_t count,
+				unsigned long mmap_addr)
+{
+	_bankshot2_fileops->PWRITE(nvf->fd, (char *)mmap_addr, count, offset);
+}
+
 /* Write back the cache file to original file. */
 /* Write locks of NVFile and Node must be held. */
 void cache_write_back(struct NVFile *nvf)
@@ -1322,7 +1330,7 @@ void cache_write_back(struct NVFile *nvf)
 			&mmap_addr) == 1)
 	{
 		if (dirty)
-			copy_from_cache(nvf, write_offset, write_count,
+			cache_write_back_extent(nvf, write_offset, write_count,
 						mmap_addr);
 		remove_extent(nvf, write_offset);
 	}
