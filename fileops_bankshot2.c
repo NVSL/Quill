@@ -1273,6 +1273,46 @@ void cache_write_back(struct NVFile *nvf)
 	}
 }
 
+/*
+ * Locates an extent in the file which contains the given offset
+ * nvf and node read lock must be held
+ */
+int bankshot2_get_extent(struct NVFile *nvf, off_t read_offset,
+				size_t *extent_length, unsigned long *mmap_addr,
+				size_t *file_length, int rnw, char *buf)
+{
+	int ret;
+
+	ret = find_extent(nvf, )
+
+
+		if (ret == 0 || ret == 2) {
+			// Not fully in cache. Copy to cache first and add extent.
+			if (ret == 2) {
+				// Copy the covered part first
+				covered_size = read_count - (offset - read_offset);
+				memcpy1(buf, (char *)(mmap_addr + offset - read_offset), covered_size);
+				buf += covered_size;
+				read_offset += read_count;
+				read_count = len_to_read - covered_size;
+			}
+
+			DEBUG("find_extent return %d, original offset %li, count %li, actual offset %li, count %li\n", ret, offset, len_to_read, read_offset, read_count);
+			copy_to_cache(nvf, buf, 1, read_offset, read_count, &mmap_addr);
+			if (mmap_addr == 0)
+				assert(0);
+
+			// Acquire node write lock for add_extent
+			NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+			NVP_LOCK_NODE_WR(nvf);
+			add_extent(nvf, offset, len_to_read, 0, mmap_addr);
+			NVP_UNLOCK_NODE_WR(nvf);
+			NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+			DO_MSYNC(nvf);
+//			return len_to_read;
+		}
+
+}
 /* Read lock of nvf and node are held */
 RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 {
@@ -1371,7 +1411,8 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 
 	while(len_to_read > 0) {
 		DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, len_to_read);
-		ret = find_extent(nvf, read_offset, &extent_length, &mmap_addr, &file_length, READ_EXTENT, buf);
+		ret = bankshot2_get_extent(nvf, read_offset, &extent_length, &mmap_addr,
+						&file_length, READ_EXTENT, buf);
 //		DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, read_count);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
@@ -1406,35 +1447,9 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 
 		DEBUG("Pread: get extent return: mmap_addr %llx, length %llu\n",
 					mmap_addr, extent_length);
+
 		if (extent_length > len_to_read)
 			extent_length = len_to_read;
-#if 0
-		if (ret == 0 || ret == 2) {
-			// Not fully in cache. Copy to cache first and add extent.
-			if (ret == 2) {
-				// Copy the covered part first
-				covered_size = read_count - (offset - read_offset);
-				memcpy1(buf, (char *)(mmap_addr + offset - read_offset), covered_size);
-				buf += covered_size;
-				read_offset += read_count;
-				read_count = len_to_read - covered_size;
-			}
-
-			DEBUG("find_extent return %d, original offset %li, count %li, actual offset %li, count %li\n", ret, offset, len_to_read, read_offset, read_count);
-			copy_to_cache(nvf, buf, 1, read_offset, read_count, &mmap_addr);
-			if (mmap_addr == 0)
-				assert(0);
-
-			// Acquire node write lock for add_extent
-			NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-			NVP_LOCK_NODE_WR(nvf);
-			add_extent(nvf, offset, len_to_read, 0, mmap_addr);
-			NVP_UNLOCK_NODE_WR(nvf);
-			NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
-			DO_MSYNC(nvf);
-//			return len_to_read;
-		}
-#endif
 		// File extent in cache. Just copy it to buf.
 #if TIME_READ_MEMCPY
 //		int cpu = get_cpuid();

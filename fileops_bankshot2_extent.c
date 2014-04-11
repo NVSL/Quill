@@ -96,19 +96,19 @@ int find_extent(struct NVFile *nvf, off_t *offset, size_t *count,
 	struct extent_cache_entry *current = x->key;
 
 	// Fully covered
-	if (current->offset + current->count >= *offset + *count) {
-		*mmap_addr = current->mmap_addr;
-		*offset = current->offset;
-		*count = current->count;
-		return 1;
-	} else { // Partially covered
+//	if (current->offset + current->count >= *offset + *count) {
+	*mmap_addr = current->mmap_addr;
+	*offset = current->offset;
+	*count = current->count;
+	return 1;
+//	} else { // Partially covered
 //		*count -= current->offset + current->count - *offset;
 //		*offset = current->offset + current->count;
-		*mmap_addr = current->mmap_addr;
-		*offset = current->offset;
-		*count = current->count;
-		return 2;
-	}
+//		*mmap_addr = current->mmap_addr;
+//		*offset = current->offset;
+//		*count = current->count;
+//		return 2;
+//	}
 }
 
 /* Add an extent to cache tree */
