@@ -461,7 +461,7 @@ static char* _bankshot2_get_cachefile_path(const char *path)
 }
 #endif
 
-/* Open the cache file and mmap it. We're holding NVF lock and node lock. */
+/* Get the cache file inode. We're holding NVF lock and node lock. */
 static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 					struct NVFile *nvf)
 {
@@ -475,41 +475,6 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	
 	DEBUG("_bankshot2_get_cache_inode for %s\n", path);
 
-# if 0
-	struct stat file_st;
-
-	if(access(path, F_OK)) // file doesn't exist
-	{
-		if(FLAGS_INCLUDE(oflag, O_CREAT))
-		{
-			DEBUG("File does not exist and is set to be created.\n");
-		}
-		else
-		{
-			MSG("File does not exist and is not set to be created. Add O_CREAT\n");
-			oflag |= O_CREAT;
-		}
-	}
-	else
-	{
-		if(stat(path, &file_st))
-		{
-			DEBUG("File exists but failed to get file stats!\n");
-			errno = EACCES;
-			return -1;
-		}
-
-		if(S_ISREG(file_st.st_mode))
-		{
-			DEBUG("File at path %s is a regular file, all is well.\n", path);
-		}
-		else
-		{
-			DEBUG("File at path %s is NOT a regular file!  INCONCEIVABLE\n", path);
-			assert(S_ISREG(file_st.st_mode));
-		}
-	}
-#endif
 	int result;
 	struct bankshot2_cache_data data;
 
@@ -521,14 +486,11 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	}
 
 	data.file = nvf->fd;
-//	data.offset = 0;
-//	data.size = 4096;
 	data.cache_ino = 0;
 	data.read = nvf->canRead ? 1 : 0;
 	data.write = nvf->canWrite ? 1 : 0;
 
 	DEBUG("Send IOCTL_GET_INODE request\n");
-//	result = _bankshot2_fileops->OPEN(path, oflag & (~O_APPEND), mode);
 	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
 					BANKSHOT2_IOCTL_GET_INODE, &data);
 
@@ -540,30 +502,12 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 
 	printf("_bankshot2_get_cache_inode succeeded for path %s: fd %llu returned.\n", path, data.cache_ino);
 
-//	SANITYCHECK(!access(path, F_OK)); // file exists
-//	if(FLAGS_INCLUDE(oflag, O_RDONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, R_OK)); } else { DEBUG("Read not requested\n"); }
-//	if(FLAGS_INCLUDE(oflag, O_WRONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, W_OK)); } else { DEBUG("Write not requested\n"); }
-#if 0
-	if(stat(path, &file_st))
-	{
-		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
-		assert(0);
-	}
-	else 
-	{
-		DEBUG("Stat successful for newly opened file %s (fd %i)\n", path, result);
-	}
-#endif
-
-//	node->length = file_st.st_size;
 	node->maplength = 0;
 	node->cache_serialno = data.cache_ino;
 	node->cache_length = data.cache_file_size;
 
 	bankshot2_setup_extent_tree(node);
 
-//	nvf->cache_fd = result;
-	
 	nvf->cache_serialno = data.cache_ino;
 
 /*
@@ -590,7 +534,7 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 		assert(0);
 	}
 */
-	SANITYCHECK(nvf->node->cache_length == data.cache_file_size);
+//	SANITYCHECK(nvf->node->cache_length == data.cache_file_size);
 
 //	DEBUG("Meh, why not allocate a new map every time\n");
 	//nvf->node->maplength = -1;
@@ -621,17 +565,11 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 //	}
 #endif
 
-	SANITYCHECK(nvf->node->cache_length >= 0);
-	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length);
+//	SANITYCHECK(nvf->node->cache_length >= 0);
+//	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length);
 
-	nvf->offset = (size_t*)calloc(1, sizeof(int));
-	*nvf->offset = 0;
-
-	//nvf->node->valid = 1;
-	
 	DO_MSYNC(nvf);
 
-	errno = 0;
 	return nvf->cache_serialno;
 }
 
@@ -754,7 +692,6 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		if(node==NULL) {
 			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
-//			int asdf=1; while(asdf){};
 			NVP_LOCK_INIT(node->lock);
 			node->length = file_st.st_size;
 			node->maplength = 0;
