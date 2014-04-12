@@ -1277,41 +1277,56 @@ void cache_write_back(struct NVFile *nvf)
  * Locates an extent in the file which contains the given offset
  * nvf and node read lock must be held
  */
-int bankshot2_get_extent(struct NVFile *nvf, off_t read_offset,
+int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				size_t *extent_length, unsigned long *mmap_addr,
 				size_t *file_length, int rnw, char *buf)
 {
 	int ret;
+	off_t cached_extent_offset;
+	size_t cached_extent_length;
+	unsigned long cached_extent_start;
 
-	ret = find_extent(nvf, )
+	cached_extent_offset = offset;
 
+	ret = find_extent(nvf, &cached_extent_offset, &cached_extent_length,
+					&cached_extent_start);
 
-		if (ret == 0 || ret == 2) {
-			// Not fully in cache. Copy to cache first and add extent.
-			if (ret == 2) {
-				// Copy the covered part first
-				covered_size = read_count - (offset - read_offset);
-				memcpy1(buf, (char *)(mmap_addr + offset - read_offset), covered_size);
-				buf += covered_size;
-				read_offset += read_count;
-				read_count = len_to_read - covered_size;
-			}
-
-			DEBUG("find_extent return %d, original offset %li, count %li, actual offset %li, count %li\n", ret, offset, len_to_read, read_offset, read_count);
-			copy_to_cache(nvf, buf, 1, read_offset, read_count, &mmap_addr);
-			if (mmap_addr == 0)
-				assert(0);
-
-			// Acquire node write lock for add_extent
-			NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-			NVP_LOCK_NODE_WR(nvf);
-			add_extent(nvf, offset, len_to_read, 0, mmap_addr);
-			NVP_UNLOCK_NODE_WR(nvf);
-			NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
-			DO_MSYNC(nvf);
-//			return len_to_read;
+	if (ret != 1) {
+		// Not fully in cache. Copy to cache first and add extent.
+# if 0
+		if (ret == 2) {
+			// Copy the covered part first
+			covered_size = read_count - (offset - read_offset);
+			memcpy1(buf, (char *)(mmap_addr + offset - read_offset), covered_size);
+			buf += covered_size;
+			read_offset += read_count;
+			read_count = len_to_read - covered_size;
 		}
+#endif
+		DEBUG("find_extent return %d, original offset %li, count %li, actual offset %li, count %li\n", ret, offset, len_to_read, read_offset, read_count);
+		copy_to_cache(nvf, buf, 1, read_offset, read_count, mmap_addr);
+		if (mmap_addr == 0)
+			assert(0);
 
+		// Acquire node write lock for add_extent
+		NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+		NVP_LOCK_NODE_WR(nvf);
+		add_extent(nvf, offset, len_to_read, 0, *mmap_addr);
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+		DO_MSYNC(nvf);
+//			return len_to_read;
+	}
+
+	*mmap_addr = cached_extent_start + (offset - cached_extent_offset);
+	*extent_length = cached_extent_length - (offset - cached_extent_offset);
+
+	if (*extent_length <= 0) {
+		ERROR("Return extent_length <= 0\n");
+		assert(0);
+	}
+
+	return ret;
 }
 /* Read lock of nvf and node are held */
 RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
