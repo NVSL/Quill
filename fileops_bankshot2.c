@@ -1175,27 +1175,17 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 	return result;
 }
 
-void copy_to_cache(struct NVFile *nvf, char *buf, int read, off_t offset,
-			size_t count, unsigned long *mmap_addr)
+int copy_to_cache(struct NVFile *nvf, struct bankshot2_cache_data *data)
 {
 //	ssize_t extension = count + offset - (nvf->node->cache_length) ;
-	struct bankshot2_cache_data data;
 	int result;
 
-	DEBUG("copy_to_cache: %s, cache inode %d, offset %li, size %li\n", read ? "read" : "write",
-			nvf->cache_serialno, offset, count);
-
-	data.file = nvf->fd;
-	data.offset = offset;
-	data.size = count;
-	data.buf = buf;
-	data.cache_ino = nvf->cache_serialno;
-	data.rnw = read ? READ_EXTENT : WRITE_EXTENT;
-	data.read = (data.rnw == READ_EXTENT);
-	data.write = (data.rnw == WRITE_EXTENT);
+	DEBUG("copy_to_cache: %s, cache inode %d, offset %li, size %li\n",
+			data->rnw ? "read" : "write",
+			data->cache_ino, data->offset, data->size);
 
 	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
-					BANKSHOT2_IOCTL_CACHE_DATA, &data);
+					BANKSHOT2_IOCTL_CACHE_DATA, data);
 	if (result < 0) {
 		ERROR("ioctl cache data read failed %d\n", result);
 		assert(0);
@@ -1205,8 +1195,9 @@ void copy_to_cache(struct NVFile *nvf, char *buf, int read, off_t offset,
 
 //	_bankshot2_fileops->PREAD(nvf->fd, buf, count, offset);
 //	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
-	*mmap_addr = data.mmap_addr;
+//	*mmap_addr = data.mmap_addr;
 
+	return result;
 #if 0
 	if(extension > 0) {
 		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->cache_length, nvf->node->cache_length + extension);
@@ -1281,17 +1272,36 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				size_t *extent_length, unsigned long *mmap_addr,
 				size_t *file_length, int rnw, char *buf)
 {
-	int ret;
+	int ret, feret;
 	off_t cached_extent_offset;
 	size_t cached_extent_length;
+	struct bankshot2_cache_data data;
+	size_t request_len = *file_length;
+	
 	unsigned long cached_extent_start;
 
 	cached_extent_offset = offset;
 
-	ret = find_extent(nvf, &cached_extent_offset, &cached_extent_length,
+	feret = find_extent(nvf, &cached_extent_offset, &cached_extent_length,
 					&cached_extent_start);
+	*file_length = nvf->node->length;
 
-	if (ret != 1) {
+	if (feret == 1) {
+		*mmap_addr = cached_extent_start + (offset - cached_extent_offset);
+		*extent_length = cached_extent_length - (offset - cached_extent_offset);
+		return 0;
+	}
+
+	data.file = nvf->fd;
+	data.offset = offset;
+	data.file_length = *file_length;
+	data.size = request_len;
+	data.buf = buf;
+	data.cache_ino = nvf->cache_serialno;
+	data.rnw = rnw ? READ_EXTENT : WRITE_EXTENT;
+	data.read = (data.rnw == READ_EXTENT);
+	data.write = (data.rnw == WRITE_EXTENT);
+
 		// Not fully in cache. Copy to cache first and add extent.
 # if 0
 		if (ret == 2) {
@@ -1303,23 +1313,48 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 			read_count = len_to_read - covered_size;
 		}
 #endif
-		DEBUG("find_extent return %d, original offset %li, count %li, actual offset %li, count %li\n", ret, offset, len_to_read, read_offset, read_count);
-		copy_to_cache(nvf, buf, 1, read_offset, read_count, mmap_addr);
-		if (mmap_addr == 0)
-			assert(0);
+	ret = copy_to_cache(nvf, &data);
+	DEBUG("copy_to_cache return %d, offset %llu, start %llu, length %llu\n",
+	ret, data.extent_start_file_offset, data.extent_start,
+	data.extent_length);
 
-		// Acquire node write lock for add_extent
-		NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-		NVP_LOCK_NODE_WR(nvf);
-		add_extent(nvf, offset, len_to_read, 0, *mmap_addr);
-		NVP_UNLOCK_NODE_WR(nvf);
-		NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
-		DO_MSYNC(nvf);
-//			return len_to_read;
+	if (ret == 0 || ret == 2 || ret == 3) {
+		if ((data.extent_start == (uint64_t)(-512) && data.extent_length == (uint64_t)(-512))
+				|| data.file_length == 0) {
+			*file_length = data.file_length;
+			DEBUG("Found EOF\n");
+			return 3;
+		} else if (data.extent_start == (uint64_t)(-512)) {
+			*extent_length = data.extent_length - (data.extent_start_file_offset - offset);
+			*file_length = data.file_length;
+			DEBUG("Found Hole @ EOF\n");
+			return 4;
+		} else if (data.extent_start_file_offset > offset) {
+			*extent_length = data.extent_start_file_offset - offset;
+			*file_length = data.file_length;
+			DEBUG("Found Hole\n");
+			return 2;
+		} else {
+			if (ret != 3) {
+				// Acquire node write lock for add_extent
+				NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+				NVP_LOCK_NODE_WR(nvf);
+				add_extent(nvf, data.extent_start_file_offset,
+						data.extent_length, 0, data.mmap_addr);
+				NVP_UNLOCK_NODE_WR(nvf);
+				NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+				bankshot2_update_file_length(nvf, data.file_length);
+			}
+			if (ret == 2 || ret == 3)
+				ret = 5;
+			else
+				ret = 0;
+		}
 	}
 
-	*mmap_addr = cached_extent_start + (offset - cached_extent_offset);
-	*extent_length = cached_extent_length - (offset - cached_extent_offset);
+	*mmap_addr = data.mmap_addr + (offset - data.extent_start_file_offset);
+	*extent_length = data.extent_length - (offset - cached_extent_offset);
+	*file_length = data.file_length;
 
 	if (*extent_length <= 0) {
 		ERROR("Return extent_length <= 0\n");
@@ -1426,6 +1461,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 
 	while(len_to_read > 0) {
 		DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, len_to_read);
+		file_length = len_to_read;
 		ret = bankshot2_get_extent(nvf, read_offset, &extent_length, &mmap_addr,
 						&file_length, READ_EXTENT, buf);
 //		DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, read_count);
