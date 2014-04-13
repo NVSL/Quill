@@ -1315,8 +1315,8 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 #endif
 	ret = copy_to_cache(nvf, &data);
 	DEBUG("copy_to_cache return %d, offset %llu, start %llu, length %llu\n",
-	ret, data.extent_start_file_offset, data.extent_start,
-	data.extent_length);
+		ret, data.extent_start_file_offset, data.extent_start,
+		data.extent_length);
 
 	if (ret == 0 || ret == 2 || ret == 3) {
 		if ((data.extent_start == (uint64_t)(-512) && data.extent_length == (uint64_t)(-512))
@@ -1345,11 +1345,14 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
 				bankshot2_update_file_length(nvf, data.file_length);
 			}
-			if (ret == 2 || ret == 3)
-				ret = 5;
-			else
-				ret = 0;
+//			if (ret == 2 || ret == 3)
+			ret = 5;
+//			else
+//				ret = 0;
 		}
+	} else {
+		ERROR("copy_to_cache returned %d\n");
+		assert(0);
 	}
 
 	*mmap_addr = data.mmap_addr + (offset - data.extent_start_file_offset);
@@ -1492,6 +1495,10 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 				return read_count;
 			}
 			break;
+		case 5: // Done by kernel.
+			if (extent_length > len_to_read)
+				extent_length = len_to_read;
+			goto update_length;
 		default:
 			break;
 		}
