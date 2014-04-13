@@ -1264,6 +1264,11 @@ void cache_write_back(struct NVFile *nvf)
 	}
 }
 
+inline void bankshot2_update_file_length(struct NVFile *nvf, size_t file_length)
+{
+	//FIXME: need write lock here
+	nvf->node->length = file_length;
+}
 /*
  * Locates an extent in the file which contains the given offset
  * nvf and node read lock must be held
@@ -1552,8 +1557,11 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 {
 	int ret = 0;
 	off_t write_offset;
-	size_t write_count, covered_size;
+	off_t temp_write_offset;
+	size_t write_count, extent_length;
+	size_t posix_write, temp_extent_length;
 	unsigned long mmap_addr = 0;
+	size_t file_length;
 	char *new_buf;
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
@@ -1597,6 +1605,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 		}
 	}
 
+#if 0
 	int intersects = 0;
 
 	if( buf == (void*)nvf->node->data ) { intersects = 1; }
@@ -1609,16 +1618,17 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 		assert(0);
 		return -1;
 	}
+#endif
 	
 	if(nvf->append)
 	{
-		DEBUG("this fd (%i) is O_APPEND; setting offset from the passed value (%li) to the end of the file (%li) prior to writing anything\n", nvf->fd, offset, nvf->node->cache_length);
-		offset = nvf->node->cache_length;
+		DEBUG("this fd (%i) is O_APPEND; setting offset from the passed value (%li) to the end of the file (%li) prior to writing anything\n", nvf->fd, offset, nvf->node->length);
+		offset = nvf->node->length;
 	}
 
-	ssize_t extension = count + offset - (nvf->node->cache_length) ;
+	ssize_t extension = count + offset - (nvf->node->length) ;
 
-	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->cache_length, offset, extension, count);
+	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->length, offset, extension, count);
 
 //	extension = 0;
 	if(extension > 0)
@@ -1628,15 +1638,15 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 		#endif
 
 		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
-			count, nvf->node->cache_length, offset, count, extension);
+			count, nvf->node->length, offset, count, extension);
 		
-		if( offset+count >= nvf->node->maplength )
+		if( offset+count >= nvf->node->cache_length )
 		{
 			DEBUG("Request will also extend map; doing that before extending file.\n");
 //			_bankshot2_extend_map(nvf, offset+count );
 		} else {
-			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->maplength, offset+count);
-			SANITYCHECK(nvf->node->maplength > (offset+count));
+			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->cache_length, offset+count);
+			SANITYCHECK(nvf->node->cache_length > (offset+count));
 		}
 
 		DEBUG("Done extending map(s), now let's exend the file with PWRITE ");
@@ -1666,20 +1676,20 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	}
 	else
 	{
-		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->cache_length);
+		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->length);
 	}
 
-	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p (%p+%li), %p, %li)\n", nvf->node->data+offset, nvf->node->data, offset, buf, count);
+//	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p (%p+%li), %p, %li)\n", nvf->node->data+offset, nvf->node->data, offset, buf, count);
 	
 	if(extension > 0)
 	{
-		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, (nvf->node->cache_length+extension));
-		SANITYCHECK( (nvf->node->cache_length+extension) < nvf->node->maplength);
+		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->cache_length, (nvf->node->length+extension));
+		SANITYCHECK( (nvf->node->length+extension) < nvf->node->cache_length);
 	}
 	else
 	{
-		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, nvf->node->cache_length);
-		SANITYCHECK( (nvf->node->cache_length) < nvf->node->maplength);
+		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->cache_length, nvf->node->length);
+		SANITYCHECK( (nvf->node->length) < nvf->node->cache_length);
 	}
 
 	SANITYCHECK(nvf->valid);
@@ -1690,9 +1700,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
 
-	/* If request extent not in cache, we need to add extent */
-	write_count = count;
-	write_offset = offset;
+#if 0
 	DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, write_count);
 	ret = find_extent(nvf, &write_offset, &write_count, &mmap_addr);
 	DEBUG("Pwrite: looking for extent returned %d\n", ret);
@@ -1738,7 +1746,99 @@ extend:
 	//nvf->offset += count; // NOT IN PWRITE (this happens in write)
 
 	DEBUG("About to return from _bankshot2_PWRITE with ret val %li.  file len: %li, file off: %li, map len: %li, node %p\n", count, nvf->node->cache_length, nvf->offset, nvf->node->maplength, nvf->node);
+#endif
 
+	ssize_t len_to_write = count;
+
+	/* If request extent not in cache, we need to write to cache and add extent */
+	write_count = 0;
+	write_offset = offset;
+	new_buf = (char *)buf;
+
+	while(len_to_write > 0) {
+		DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, len_to_write);
+		file_length = len_to_write;
+		ret = bankshot2_get_extent(nvf, write_offset, &extent_length, &mmap_addr,
+						&file_length, WRITE_EXTENT, new_buf);
+		switch (ret) {
+		case 0:	// It's cached. Do memcpy.
+			break;
+		case 1:	// We have some big troubles.
+			return write_count;
+		case 2:
+		case 4: // File hole, return zeros.
+			if (extent_length > len_to_write)
+				extent_length = len_to_write;
+			DEBUG("File hole. fill with posix write. Offset: %.16llx, len: %llu\n",
+					write_offset, extent_length);
+			temp_extent_length = extent_length;
+			temp_write_offset = write_offset;
+			while (temp_extent_length > 0) {
+				posix_write = _bankshot2_fileops->PWRITE(file, _bankshot2_zbuf,
+						temp_extent_length >= 512 ? 512 : temp_extent_length,
+						temp_write_offset);
+				temp_extent_length -= posix_write;
+				temp_write_offset += posix_write;
+			}
+			goto update_length;
+		case 3: // EOF. write only correct amount.
+			if (write_offset + len_to_write > file_length) {
+				DEBUG("Near file end. Extending file\n");
+
+				posix_write = _bankshot2_fileops->PWRITE(file, buf,
+						len_to_write, write_offset);
+//				if (read_offset + posix_read > file_length)
+//					bankshot2_update_file_length(nvf, read_offset + posix_read);
+
+				write_count += posix_write;
+				return write_count;
+			}
+			break;
+		case 5: // Done by kernel.
+			if (extent_length > len_to_write)
+				extent_length = len_to_write;
+			goto update_length;
+		default:
+			break;
+		}
+
+		DEBUG("Pwrite: get extent return: mmap_addr %llx, length %llu\n",
+					mmap_addr, extent_length);
+
+		if (extent_length > len_to_write)
+			extent_length = len_to_write;
+		// File extent in cache. Just copy it to buf.
+#if TIME_READ_MEMCPY
+//		int cpu = get_cpuid();
+		uint64_t start_time = getcycles();
+#endif
+
+#if NOSANITYCHECK
+#else
+		void* result =
+#endif
+//			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
+			FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
+
+
+#if TIME_READ_MEMCPY
+		uint64_t end_time = getcycles();
+		total_memcpy_cycles += end_time - start_time;
+//		if(cpu != get_cpuid()) {
+//			printf("cpuid changed\n");
+//			exit(1);
+//		}
+#endif
+
+		SANITYCHECK(result == buf);
+		SANITYCHECK(result > 0);
+update_length:
+		len_to_write -= extent_length;
+		write_offset += extent_length;
+		write_count  += extent_length;
+		buf += extent_length; 
+
+	}
 	DO_MSYNC(nvf);
 
 	return count;
