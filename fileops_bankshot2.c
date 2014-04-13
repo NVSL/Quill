@@ -1472,7 +1472,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 		file_length = len_to_read;
 		ret = bankshot2_get_extent(nvf, read_offset, &extent_length, &mmap_addr,
 						&file_length, READ_EXTENT, buf);
-//		DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, read_count);
+		DEBUG("Pread: get_extent returned %d\n", ret);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
 			break;
@@ -1683,8 +1683,8 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	
 	if(extension > 0)
 	{
-		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->cache_length, (nvf->node->length+extension));
-		SANITYCHECK( (nvf->node->length+extension) < nvf->node->cache_length);
+//		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->cache_length, (nvf->node->length+extension));
+//		SANITYCHECK( (nvf->node->length+extension) < nvf->node->cache_length);
 	}
 	else
 	{
@@ -1694,9 +1694,9 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 
 	SANITYCHECK(nvf->valid);
 	SANITYCHECK(nvf->node != NULL);
-	SANITYCHECK(nvf->node->data != NULL);
+//	SANITYCHECK(nvf->node->data != NULL);
 //	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length + ((extension>0)?extension:0));
-	SANITYCHECK(nvf->node->data+offset > 0);
+//	SANITYCHECK(nvf->node->data+offset > 0);
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
 
@@ -1760,6 +1760,7 @@ extend:
 		file_length = len_to_write;
 		ret = bankshot2_get_extent(nvf, write_offset, &extent_length, &mmap_addr,
 						&file_length, WRITE_EXTENT, new_buf);
+		DEBUG("Pwrite: get_extent returned %d\n", ret);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
 			break;
