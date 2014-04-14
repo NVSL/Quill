@@ -303,6 +303,7 @@ void xil_printf( FILE * file, const charptr ctrl1, ...)
 
             case 'i':
 	    case 'd':
+	    case 'u':
                 if (long_flag || ch == 'D') {
                     outnum( va_arg(argp, long), 10L, &par);
                     continue;
