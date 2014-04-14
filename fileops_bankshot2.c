@@ -1275,7 +1275,7 @@ inline void bankshot2_update_file_length(struct NVFile *nvf, size_t file_length)
  */
 int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				size_t *extent_length, unsigned long *mmap_addr,
-				size_t *file_length, int rnw, char *buf)
+				size_t *file_length, int rnw, char *buf, int wr_lock)
 {
 	int ret, feret;
 	off_t cached_extent_offset;
@@ -1342,12 +1342,16 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		} else {
 			if (ret != 3) {
 				// Acquire node write lock for add_extent
-				NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-				NVP_LOCK_NODE_WR(nvf);
+				if (!wr_lock) {
+					NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+					NVP_LOCK_NODE_WR(nvf);
+				}
 				add_extent(nvf, data.extent_start_file_offset,
 						data.extent_length, 0, data.mmap_addr);
-				NVP_UNLOCK_NODE_WR(nvf);
-				NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+				if (!wr_lock) {
+					NVP_UNLOCK_NODE_WR(nvf);
+					NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+				}
 				bankshot2_update_file_length(nvf, data.file_length);
 			}
 //			if (ret == 2 || ret == 3)
@@ -1471,7 +1475,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 		DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, len_to_read);
 		file_length = len_to_read;
 		ret = bankshot2_get_extent(nvf, read_offset, &extent_length, &mmap_addr,
-						&file_length, READ_EXTENT, buf);
+						&file_length, READ_EXTENT, buf, 0);
 		DEBUG("Pread: get_extent returned %d\n", ret);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
@@ -1759,7 +1763,7 @@ extend:
 		DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, len_to_write);
 		file_length = len_to_write;
 		ret = bankshot2_get_extent(nvf, write_offset, &extent_length, &mmap_addr,
-						&file_length, WRITE_EXTENT, new_buf);
+						&file_length, WRITE_EXTENT, new_buf, wr_lock);
 		DEBUG("Pwrite: get_extent returned %d\n", ret);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
@@ -1841,6 +1845,7 @@ update_length:
 
 	}
 	DO_MSYNC(nvf);
+	DEBUG("_bankshot2_do_pwrite returned %lu\n", count);
 
 	return count;
 }
