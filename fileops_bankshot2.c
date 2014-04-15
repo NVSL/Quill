@@ -1561,9 +1561,10 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 {
 	int ret = 0;
 	off_t write_offset;
-	off_t temp_write_offset;
+//	off_t temp_write_offset;
 	size_t write_count, extent_length;
-	size_t posix_write, temp_extent_length;
+	size_t posix_write;
+//	size_t temp_extent_length;
 	unsigned long mmap_addr = 0;
 	size_t file_length;
 	char *new_buf;
@@ -1635,6 +1636,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->length, offset, extension, count);
 
 //	extension = 0;
+#if 0
 	if(extension > 0)
 	{
 		#if COUNT_EXTENDS
@@ -1682,6 +1684,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	{
 		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->length);
 	}
+#endif
 
 //	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p (%p+%li), %p, %li)\n", nvf->node->data+offset, nvf->node->data, offset, buf, count);
 	
@@ -1776,6 +1779,9 @@ extend:
 				extent_length = len_to_write;
 			DEBUG("File hole. fill with posix write. Offset: %.16llx, len: %llu\n",
 					write_offset, extent_length);
+			posix_write = _bankshot2_fileops->PWRITE(file, buf,
+					extent_length, write_offset);
+#if 0
 			temp_extent_length = extent_length;
 			temp_write_offset = write_offset;
 			while (temp_extent_length > 0) {
@@ -1785,6 +1791,7 @@ extend:
 				temp_extent_length -= posix_write;
 				temp_write_offset += posix_write;
 			}
+#endif
 			goto update_length;
 		case 3: // EOF. write only correct amount.
 			if (write_offset + len_to_write > file_length) {
@@ -1792,8 +1799,8 @@ extend:
 
 				posix_write = _bankshot2_fileops->PWRITE(file, buf,
 						len_to_write, write_offset);
-//				if (read_offset + posix_read > file_length)
-//					bankshot2_update_file_length(nvf, read_offset + posix_read);
+				if (write_offset + posix_write > file_length)
+					bankshot2_update_file_length(nvf, write_offset + posix_write);
 
 				write_count += posix_write;
 				return write_count;
