@@ -1303,7 +1303,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	data.size = request_len;
 	data.buf = buf;
 	data.cache_ino = nvf->cache_serialno;
-	data.rnw = rnw ? READ_EXTENT : WRITE_EXTENT;
+	data.rnw = rnw;
 	data.read = (data.rnw == READ_EXTENT);
 	data.write = (data.rnw == WRITE_EXTENT);
 
