@@ -1346,6 +1346,9 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 					NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
 					NVP_LOCK_NODE_WR(nvf);
 				}
+				DEBUG("Add extent: start offset %llu, mmap_addr %llx, length %llu\n",
+						data.extent_start_file_offset, data.mmap_addr,
+						data.extent_length);
 				add_extent(nvf, data.extent_start_file_offset,
 						data.extent_length, 0, data.mmap_addr);
 				if (!wr_lock) {
