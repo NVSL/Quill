@@ -1198,12 +1198,6 @@ int copy_to_cache(struct NVFile *nvf, struct bankshot2_cache_data *data)
 //	*mmap_addr = data.mmap_addr;
 
 	return result;
-#if 0
-	if(extension > 0) {
-		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->cache_length, nvf->node->cache_length + extension);
-		nvf->node->cache_length += extension;
-	}
-#endif
 }
 
 void copy_from_cache(struct NVFile *nvf, off_t offset, size_t count,
@@ -1436,6 +1430,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 		}
 	}
 
+#if 0
 	int intersects = 0;
 
 	if(UNLIKELY( buf == (void*)nvf->node->data )) { intersects = 1; }
@@ -1448,7 +1443,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 		assert(0);
 		return -1;
 	}
-
+#endif
 	ssize_t len_to_read = count;
 
 	DEBUG("time for a Pread.  file length %li, offset %li, length-offset %li, count %li, count>offset %s\n", nvf->node->length, offset, available_length, count, (count>available_length)?"true":"false");
