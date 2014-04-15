@@ -1181,7 +1181,7 @@ int copy_to_cache(struct NVFile *nvf, struct bankshot2_cache_data *data)
 	int result;
 
 	DEBUG("copy_to_cache: %s, cache inode %d, offset %li, size %li\n",
-			data->rnw ? "read" : "write",
+			(data->rnw == READ_EXTENT) ? "read" : "write",
 			data->cache_ino, data->offset, data->size);
 
 	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
@@ -1267,6 +1267,7 @@ void cache_write_back(struct NVFile *nvf)
 inline void bankshot2_update_file_length(struct NVFile *nvf, size_t file_length)
 {
 	//FIXME: need write lock here
+	DEBUG("Update file %d length to %lu\n", nvf->fd, file_length);
 	nvf->node->length = file_length;
 }
 /*
