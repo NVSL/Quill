@@ -1567,6 +1567,8 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	unsigned long mmap_addr = 0;
 	size_t file_length;
 	char *new_buf;
+	int fix_mode;
+	char temp_buf[PAGE_SIZE];
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
@@ -1762,6 +1764,42 @@ extend:
 	new_buf = (char *)buf;
 
 	while(len_to_write > 0) {
+		// If offset is unaligned to page or the length is smaller
+		// than PAGE_SIZE, we need to read the data first
+		if ((write_offset % PAGE_SIZE) || (len_to_write < PAGE_SIZE)) {
+			if (write_offset % PAGE_SIZE == 0) {
+				// Len_to_write < PAGE_SIZE
+				fix_mode = 1;
+				origin_buf = buf;
+
+				_bankshot2_do_pread(file, temp_buf, PAGE_SIZE, write_offset);
+				memcpy(temp_buf, buf, len_to_write);
+
+				len_to_write = PAGE_SIZE;
+				buf = temp_buf;
+			} else {
+				fix_mode = 2;
+
+				fix_offset = write_offset;
+				origin_buf = buf;
+				fix_len = len_to_write;
+
+				len_to_write = PAGE_SIZE;
+				buf = temp_buf;
+				write_offset -= (write_offset % PAGE_SIZE);
+
+				_bankshot2_do_pread(file, temp_buf, PAGE_SIZE, fix_offset);
+				if (fix_len < (PAGE_SIZE - (fix_offset - write_offset)))
+					memcpy(temp_buf + (fix_offset - write_offset),
+						origin_buf, fix_len);
+				else
+					memcpy(temp_buf + (fix_offset - write_offset),
+						origin_buf, PAGE_SIZE - (fix_offset - write_offset);
+
+
+			}
+		}
+
 		DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, len_to_write);
 		file_length = len_to_write;
 		ret = bankshot2_get_extent(nvf, write_offset, &extent_length, &mmap_addr,
