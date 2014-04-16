@@ -11,6 +11,8 @@
 
 #define DO_ALIGNMENT_CHECKS 0
 
+#define PAGE_SIZE	4096
+
 struct timezone;
 struct timeval;
 int gettimeofday(struct timeval *tv, struct timezone *tz);
@@ -1251,6 +1253,10 @@ void cache_write_back(struct NVFile *nvf)
 	while (first_extent(nvf, &write_offset, &write_count, &dirty,
 			&mmap_addr) == 1)
 	{
+		DEBUG("extent: dirty %d, offset %lu, count %d, mmap addr %lx, "
+			"[0]: %c\n",
+			dirty, write_offset, write_count, mmap_addr,
+			*(char *)mmap_addr);
 		if (dirty)
 			cache_write_back_extent(nvf, write_offset, write_count,
 						mmap_addr);
@@ -1345,7 +1351,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 						data.extent_start_file_offset, data.mmap_addr,
 						data.extent_length);
 				add_extent(nvf, data.extent_start_file_offset,
-						data.extent_length, 0, data.mmap_addr);
+						data.extent_length, data.write, data.mmap_addr);
 				if (!wr_lock) {
 					NVP_UNLOCK_NODE_WR(nvf);
 					NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
@@ -1560,13 +1566,13 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 {
 	int ret = 0;
 	off_t write_offset;
-//	off_t temp_write_offset;
+	off_t origin_offset;
 	size_t write_count, extent_length;
 	size_t posix_write;
-//	size_t temp_extent_length;
+	size_t origin_len, fix_len;
 	unsigned long mmap_addr = 0;
 	size_t file_length;
-	char *new_buf;
+	char *new_buf, *origin_buf;
 	int fix_mode;
 	char temp_buf[PAGE_SIZE];
 
@@ -1767,37 +1773,32 @@ extend:
 		// If offset is unaligned to page or the length is smaller
 		// than PAGE_SIZE, we need to read the data first
 		if ((write_offset % PAGE_SIZE) || (len_to_write < PAGE_SIZE)) {
+			origin_buf = new_buf;
 			if (write_offset % PAGE_SIZE == 0) {
-				// Len_to_write < PAGE_SIZE
+				// len_to_write < PAGE_SIZE
 				fix_mode = 1;
-				origin_buf = buf;
 
 				_bankshot2_do_pread(file, temp_buf, PAGE_SIZE, write_offset);
 				memcpy(temp_buf, buf, len_to_write);
-
-				len_to_write = PAGE_SIZE;
-				buf = temp_buf;
 			} else {
 				fix_mode = 2;
 
-				fix_offset = write_offset;
-				origin_buf = buf;
+				origin_offset = write_offset;
+				origin_len = len_to_write;
 				fix_len = len_to_write;
 
 				len_to_write = PAGE_SIZE;
-				buf = temp_buf;
 				write_offset -= (write_offset % PAGE_SIZE);
 
-				_bankshot2_do_pread(file, temp_buf, PAGE_SIZE, fix_offset);
-				if (fix_len < (PAGE_SIZE - (fix_offset - write_offset)))
-					memcpy(temp_buf + (fix_offset - write_offset),
-						origin_buf, fix_len);
-				else
-					memcpy(temp_buf + (fix_offset - write_offset),
-						origin_buf, PAGE_SIZE - (fix_offset - write_offset);
+				_bankshot2_do_pread(file, temp_buf, PAGE_SIZE, write_offset);
+				if (fix_len >= (PAGE_SIZE - (origin_offset - write_offset)))
+					fix_len = PAGE_SIZE - (origin_offset - write_offset);
 
-
+				memcpy(temp_buf + (origin_offset - write_offset),
+						buf, fix_len);
+				len_to_write = origin_offset - write_offset + fix_len;
 			}
+			buf = temp_buf;
 		}
 
 		DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, len_to_write);
@@ -1882,11 +1883,18 @@ extend:
 		SANITYCHECK(result == buf);
 		SANITYCHECK(result > 0);
 update_length:
-		len_to_write -= extent_length;
-		write_offset += extent_length;
-		write_count  += extent_length;
-		buf += extent_length; 
-
+		if (fix_mode == 2) {
+			len_to_write = origin_len - fix_len;
+			write_offset = origin_offset + fix_len;
+			buf = origin_buf + fix_len; 
+			write_count += fix_len;
+		} else {
+			len_to_write -= extent_length;
+			write_offset += extent_length;
+			write_count  += extent_length;
+			buf += extent_length;
+		}
+		fix_mode = 0;
 	}
 	DO_MSYNC(nvf);
 	DEBUG("_bankshot2_do_pwrite returned %lu\n", count);
