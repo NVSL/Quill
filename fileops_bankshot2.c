@@ -1578,8 +1578,6 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("_bankshot2_do_pwrite\n");
-
 	#if COUNT_EXTENDS
 	_bankshot2_wr_total++;
 	#endif
