@@ -1533,7 +1533,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 
 		segfault = setjmp(pread_jumper);
 
-		if (segfault = 0) {
+		if (segfault == 0) {
 #if NOSANITYCHECK
 #else
 			void* result =
