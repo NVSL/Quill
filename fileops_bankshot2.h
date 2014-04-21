@@ -112,4 +112,3 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write,
 int first_extent(struct NVFile *nvf, off_t *offset, size_t *count, int *dirty,
 			unsigned long *mmap_addr);
 
-
