@@ -405,7 +405,12 @@ void _bankshot2_init2(void)
 
 	DEBUG("Installing SIGBUS handler.\n");
 	signal(SIGBUS, _bankshot2_SIGBUS_handler);
-	signal(SIGSEGV, _bankshot2_SIGSEGV_handler);
+
+	struct sigaction act, oact;
+	act.sa_handler = _bankshot2_SIGSEGV_handler;
+	act.sa_flags = SA_NODEFER;
+
+	sigaction(SIGSEGV, &act, &oact);
 
 	//TODO
 	/*
