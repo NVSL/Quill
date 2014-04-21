@@ -38,8 +38,9 @@ void extent_rbtree_destroyinfo(void *key)
 void extent_rbtree_printkey(const void *key)
 {
 	const struct extent_cache_entry *current = key;
-	MSG("0x%.16llx to 0x%.16llx %d\n", current->offset,
-		current->offset + current->count, current->dirty);
+	MSG("0x%.16llx to 0x%.16llx %d, mmap addr %lx\n", current->offset,
+		current->offset + current->count, current->dirty,
+		current->mmap_addr);
 }
 
 void extent_rbtree_printinfo(void *key)

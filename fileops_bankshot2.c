@@ -64,6 +64,7 @@ void _bankshot2_init2(void);
 int _bankshot2_extend_map(struct NVFile *nvf, size_t newlen);
 int _bankshot2_test_mmap(int file, size_t newlen);
 void _bankshot2_SIGBUS_handler(int sig);
+void _bankshot2_SIGSEGV_handler(int sig);
 void _bankshot2_test_invalidate_node(struct NVFile* nvf);
 void cache_write_back(struct NVFile *nvf);
 
@@ -84,6 +85,7 @@ RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64
 int _bankshot2_lock_return_val;
 int _bankshot2_write_pwrite_lock_handoff;
 
+static sigjmp_buf pread_jumper;
 
 //void * mremap(void *old_address, size_t old_size, size_t new_size, int flags);
 
@@ -403,6 +405,7 @@ void _bankshot2_init2(void)
 
 	DEBUG("Installing SIGBUS handler.\n");
 	signal(SIGBUS, _bankshot2_SIGBUS_handler);
+	signal(SIGSEGV, _bankshot2_SIGSEGV_handler);
 
 	//TODO
 	/*
@@ -1248,15 +1251,14 @@ void cache_write_back(struct NVFile *nvf)
 	MSG("%s: write back cache fd %d to fd %d\n", __func__,
 						nvf->fd, nvf->fd);
 
-//	RBTreePrint(nvf->node->extent_tree);
+	RBTreePrint(nvf->node->extent_tree);
 
 	while (first_extent(nvf, &write_offset, &write_count, &dirty,
 			&mmap_addr) == 1)
 	{
-		DEBUG("extent: dirty %d, offset %lu, count %d, mmap addr %lx, "
-			"[0]: %c\n",
-			dirty, write_offset, write_count, mmap_addr,
-			*(char *)mmap_addr);
+		DEBUG("extent: dirty %d, offset %lu, count %d, mmap addr %lx\n",
+			dirty, write_offset, write_count, mmap_addr);
+//			*(char *)mmap_addr);
 		if (dirty)
 			cache_write_back_extent(nvf, write_offset, write_count,
 						mmap_addr);
@@ -1385,6 +1387,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
 	int ret = 0;
+	int segfault;
 	off_t read_offset;
 	size_t read_count, extent_length;
 	size_t file_length;
@@ -1528,13 +1531,25 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 		uint64_t start_time = getcycles();
 #endif
 
+		segfault = setjmp(pread_jumper);
+
+		if (segfault = 0) {
 #if NOSANITYCHECK
 #else
-		void* result =
+			void* result =
 #endif
 //			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
-			memcpy1(buf, (char *)mmap_addr, extent_length);
-
+				memcpy1(buf, (char *)mmap_addr, extent_length);
+		} else if (segfault == 1) {
+			DEBUG("Pread caught seg fault. Remove extent and try again.\n");
+			NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+			NVP_LOCK_NODE_WR(nvf);
+			remove_extent(nvf, read_offset);
+			NVP_UNLOCK_NODE_WR(nvf);
+			NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+			segfault = 0;
+			continue;
+		}
 
 #if TIME_READ_MEMCPY
 		uint64_t end_time = getcycles();
@@ -2706,3 +2721,13 @@ void _bankshot2_SIGBUS_handler(int sig)
 	assert(0);
 }
 
+void _bankshot2_SIGSEGV_handler(int sig)
+{
+	ERROR("We got a SIGSEGV (sig %i)!  This almost certainly means someone tried to access an area inside an mmaped region but past the length of the mmapped file.\n", sig);
+	#if MANUAL_PREFAULT
+//	ERROR("   OR if this happened during prefault, we probably just tried to prefault a hole in the file, which isn't going to work.\n");
+	#endif
+//	_bankshot2_debug_handoff();
+	siglongjmp(pread_jumper, 1);
+//	assert(0);
+}

@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <setjmp.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 
