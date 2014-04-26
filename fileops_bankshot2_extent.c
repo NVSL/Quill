@@ -65,6 +65,7 @@ void bankshot2_cleanup_extent_tree(struct NVNode *node)
 
 /* Find an extent in cache tree */
 /* Read lock of NVFile and NVNode must be held */
+/* offset, count and mmap_addr must be aligned to PAGE_SIZE */
 int find_extent(struct NVFile *nvf, off_t *offset, size_t *count,
 			unsigned long *mmap_addr)
 {
@@ -114,6 +115,7 @@ int find_extent(struct NVFile *nvf, off_t *offset, size_t *count,
 
 /* Add an extent to cache tree */
 /* Must hold Write lock of NVNode */
+/* offset, count and mmap_addr must be aligned to PAGE_SIZE */
 void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write,
 			unsigned long mmap_addr)
 {

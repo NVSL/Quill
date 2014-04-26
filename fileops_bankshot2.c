@@ -1300,8 +1300,10 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	*file_length = nvf->node->length;
 
 	if (feret == 1) {
-		*mmap_addr = cached_extent_start + (offset - cached_extent_offset);
-		*extent_length = cached_extent_length - (offset - cached_extent_offset);
+		*mmap_addr = cached_extent_start +
+				(offset - cached_extent_offset);
+		*extent_length = cached_extent_length -
+				(offset - cached_extent_offset);
 		return 0;
 	}
 
