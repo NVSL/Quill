@@ -1378,7 +1378,8 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	}
 
 	*mmap_addr = data.mmap_addr + (offset - data.extent_start_file_offset);
-	*extent_length = data.extent_length - (offset - cached_extent_offset);
+	*extent_length = data.extent_length -
+				(offset - data.extent_start_file_offset);
 	*file_length = data.file_length;
 
 	if (*extent_length <= 0) {
