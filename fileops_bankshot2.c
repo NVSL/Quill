@@ -12,6 +12,7 @@
 #define DO_ALIGNMENT_CHECKS 0
 
 #define PAGE_SIZE	4096
+#define MAP_UNIT	2097152
 
 struct timezone;
 struct timeval;
@@ -1316,7 +1317,9 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	data.rnw = rnw;
 	data.read = (data.rnw == READ_EXTENT);
 	data.write = (data.rnw == WRITE_EXTENT);
+	data.map_length = request_len > MAP_UNIT ? request_len : MAP_UNIT;
 
+	DEBUG("request len %lu, MAP_UNIT %lu\n", request_len, MAP_UNIT);
 		// Not fully in cache. Copy to cache first and add extent.
 # if 0
 		if (ret == 2) {
@@ -1373,7 +1376,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 //				ret = 0;
 		}
 	} else {
-		ERROR("copy_to_cache returned %d\n");
+		ERROR("copy_to_cache returned %d\n", ret);
 		assert(0);
 	}
 
