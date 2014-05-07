@@ -1317,7 +1317,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	data.rnw = rnw;
 	data.read = (data.rnw == READ_EXTENT);
 	data.write = (data.rnw == WRITE_EXTENT);
-	data.map_length = request_len > MAP_UNIT ? request_len : MAP_UNIT;
+//	data.map_length = request_len > MAP_UNIT ? request_len : MAP_UNIT;
 
 	DEBUG("request len %lu, MAP_UNIT %lu\n", request_len, MAP_UNIT);
 		// Not fully in cache. Copy to cache first and add extent.
@@ -1336,7 +1336,26 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		ret, data.extent_start_file_offset, data.extent_start,
 		data.extent_length);
 
-	if (ret == 0 || ret == 2 || ret == 3) {
+	if (ret == 0) {
+		if (data.mmap_length) {
+			// Acquire node write lock for add_extent
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+				NVP_LOCK_NODE_WR(nvf);
+			}
+			DEBUG("Add extent: start offset %llu, mmap_addr %llx, length %llu\n",
+					data.mmap_offset, data.mmap_addr,
+					data.mmap_length);
+			add_extent(nvf, data.mmap_offset,
+					data.mmap_length, data.write, data.mmap_addr);
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_WR(nvf);
+				NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+			}
+		}
+		bankshot2_update_file_length(nvf, data.file_length);
+		ret = 5;
+	} else if (ret == EOF_OR_HOLE) {
 		if ((data.extent_start == (uint64_t)(-512) && data.extent_length == (uint64_t)(-512))
 				|| data.file_length == 0) {
 			*file_length = data.file_length;
@@ -1352,40 +1371,28 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 			*file_length = data.file_length;
 			DEBUG("Found Hole\n");
 			return 2;
-		} else {
-			if (ret != 3) {
-				// Acquire node write lock for add_extent
-				if (!wr_lock) {
-					NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-					NVP_LOCK_NODE_WR(nvf);
-				}
-				DEBUG("Add extent: start offset %llu, mmap_addr %llx, length %llu\n",
-						data.extent_start_file_offset, data.mmap_addr,
-						data.extent_length);
-				add_extent(nvf, data.extent_start_file_offset,
-						data.extent_length, data.write, data.mmap_addr);
-				if (!wr_lock) {
-					NVP_UNLOCK_NODE_WR(nvf);
-					NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
-				}
-				bankshot2_update_file_length(nvf, data.file_length);
-			}
-//			if (ret == 2 || ret == 3)
-			ret = 5;
-//			else
-//				ret = 0;
 		}
 	} else {
 		ERROR("copy_to_cache returned %d\n", ret);
 		assert(0);
 	}
 
-	*mmap_addr = data.mmap_addr + (offset - data.extent_start_file_offset);
-	*extent_length = data.extent_length -
-				(offset - data.extent_start_file_offset);
+//	*mmap_addr = data.mmap_addr + (offset - data.mmap_offset);
+//	*extent_length = data.extent_length -
+//				(offset - data.extent_start_file_offset);
+	/* Check if the actual transferred extent covers the required extent */
+	if ((data.actual_offset > offset) || (data.actual_length +
+			data.actual_offset) < (offset + request_len)) {
+		ERROR("Transferred extent does not cover request extent:\n"
+			"Request offset 0x%llx, length %lu;\n"
+			"actual offset 0x%llx, length\n",
+			offset, request_len,
+			data.actual_offset, data.actual_length);
+	}
+
 	*file_length = data.file_length;
 
-	if (*extent_length <= 0) {
+	if (data.actual_length <= 0) {
 		ERROR("Return extent_length <= 0\n");
 		assert(0);
 	}
