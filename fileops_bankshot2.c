@@ -87,6 +87,10 @@ int _bankshot2_lock_return_val;
 int _bankshot2_write_pwrite_lock_handoff;
 
 static sigjmp_buf pread_jumper;
+static sigjmp_buf pwrite_jumper;
+
+static int do_pread_memcpy;
+static int do_pwrite_memcpy;
 
 //void * mremap(void *old_address, size_t old_size, size_t new_size, int flags);
 
@@ -1550,6 +1554,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 #endif
 
 		segfault = sigsetjmp(pread_jumper, 0);
+		do_pread_memcpy = 1;
 
 		if (segfault == 0) {
 #if NOSANITYCHECK
@@ -1566,9 +1571,11 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 			NVP_UNLOCK_NODE_WR(nvf);
 			NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
 			segfault = 0;
+			do_pread_memcpy = 0;
 			continue;
 		}
 
+		do_pread_memcpy = 0;
 #if TIME_READ_MEMCPY
 		uint64_t end_time = getcycles();
 		total_memcpy_cycles += end_time - start_time;
@@ -1598,6 +1605,7 @@ update_length:
 RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 {
 	int ret = 0;
+	int segfault;
 	off_t write_offset;
 	off_t origin_offset;
 	size_t write_count, extent_length;
@@ -1894,12 +1902,33 @@ extend:
 		uint64_t start_time = getcycles();
 #endif
 
+		segfault = sigsetjmp(pwrite_jumper, 0);
+		do_pwrite_memcpy = 1;
+
+		if (segfault == 0) {
 #if NOSANITYCHECK
 #else
-		void* result =
+			void* result =
 #endif
 //			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
-			FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
+				FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
+		} else if (segfault == 1) {
+			DEBUG("Pwrite caught seg fault. Remove extent and try again.\n");
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
+				NVP_LOCK_NODE_WR(nvf);
+			}
+			remove_extent(nvf, write_offset);
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_WR(nvf);
+				NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+			}
+			do_pwrite_memcpy = 0;
+			segfault = 0;
+			continue;
+		}
+
+		do_pwrite_memcpy = 0;
 
 
 #if TIME_READ_MEMCPY
@@ -2746,6 +2775,12 @@ void _bankshot2_SIGSEGV_handler(int sig)
 //	ERROR("   OR if this happened during prefault, we probably just tried to prefault a hole in the file, which isn't going to work.\n");
 	#endif
 //	_bankshot2_debug_handoff();
-	siglongjmp(pread_jumper, 1);
-//	assert(0);
+	if (do_pread_memcpy) {
+		siglongjmp(pread_jumper, 1);
+	} else if (do_pwrite_memcpy) {
+		siglongjmp(pwrite_jumper, 1);
+	} else {
+		ERROR("Seg fault when neither doing pread nor pwrite!\n");
+		assert(0);
+	}
 }
