@@ -1382,8 +1382,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	}
 
 //	*mmap_addr = data.mmap_addr + (offset - data.mmap_offset);
-//	*extent_length = data.extent_length -
-//				(offset - data.extent_start_file_offset);
+	*extent_length = data.actual_length - (offset - data.actual_offset);
 	/* Check if the actual transferred extent covers the required extent */
 	if ((data.actual_offset > offset) || (data.actual_length +
 			data.actual_offset) < (offset + request_len)) {
@@ -1614,7 +1613,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	unsigned long mmap_addr = 0;
 	size_t file_length;
 	char *new_buf, *origin_buf;
-	int fix_mode;
+//	int fix_mode;
 	char temp_buf[PAGE_SIZE];
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
@@ -1811,6 +1810,7 @@ extend:
 	while(len_to_write > 0) {
 		// If offset is unaligned to page or the length is smaller
 		// than PAGE_SIZE, we need to read the data first
+#if 0
 		if ((write_offset % PAGE_SIZE) || (len_to_write < PAGE_SIZE)) {
 			origin_buf = new_buf;
 			if (write_offset % PAGE_SIZE == 0) {
@@ -1839,7 +1839,7 @@ extend:
 			}
 			buf = temp_buf;
 		}
-
+#endif
 		DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, len_to_write);
 		file_length = len_to_write;
 		ret = bankshot2_get_extent(nvf, write_offset, &extent_length, &mmap_addr,
@@ -1943,18 +1943,18 @@ extend:
 		SANITYCHECK(result == buf);
 		SANITYCHECK(result > 0);
 update_length:
-		if (fix_mode == 2) {
-			len_to_write = origin_len - fix_len;
-			write_offset = origin_offset + fix_len;
-			buf = origin_buf + fix_len; 
-			write_count += fix_len;
-		} else {
+//		if (fix_mode == 2) {
+//			len_to_write = origin_len - fix_len;
+//			write_offset = origin_offset + fix_len;
+//			buf = origin_buf + fix_len; 
+//			write_count += fix_len;
+//		} else {
 			len_to_write -= extent_length;
 			write_offset += extent_length;
 			write_count  += extent_length;
 			buf += extent_length;
-		}
-		fix_mode = 0;
+//		}
+//		fix_mode = 0;
 	}
 	DO_MSYNC(nvf);
 	DEBUG("_bankshot2_do_pwrite returned %lu\n", count);
