@@ -1386,7 +1386,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	*extent_length = data.actual_length - (offset - data.actual_offset);
 	/* Check if the actual transferred extent covers the required extent */
 	if ((data.actual_offset > offset) || (data.actual_length +
-			data.actual_offset) < (offset + request_len)) {
+			data.actual_offset) <= offset) {
 		ERROR("Transferred extent does not cover request extent:\n"
 			"Request offset 0x%llx, length %lu;\n"
 			"actual offset 0x%llx, length %lu\n",
@@ -1396,7 +1396,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 
 	*file_length = data.file_length;
 
-	if (data.actual_length <= 0) {
+	if (*extent_length <= 0) {
 		ERROR("Return extent_length <= 0\n");
 		assert(0);
 	}
@@ -1607,15 +1607,15 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	int ret = 0;
 	int segfault;
 	off_t write_offset;
-	off_t origin_offset;
+//	off_t origin_offset;
 	size_t write_count, extent_length;
 	size_t posix_write;
-	size_t origin_len, fix_len;
+//	size_t origin_len, fix_len;
 	unsigned long mmap_addr = 0;
 	size_t file_length;
-	char *new_buf, *origin_buf;
+	char *new_buf;
 //	int fix_mode;
-	char temp_buf[PAGE_SIZE];
+//	char temp_buf[PAGE_SIZE];
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
@@ -1950,10 +1950,10 @@ update_length:
 //			buf = origin_buf + fix_len; 
 //			write_count += fix_len;
 //		} else {
-			len_to_write -= extent_length;
-			write_offset += extent_length;
-			write_count  += extent_length;
-			buf += extent_length;
+		len_to_write -= extent_length;
+		write_offset += extent_length;
+		write_count  += extent_length;
+		buf += extent_length;
 //		}
 //		fix_mode = 0;
 	}
