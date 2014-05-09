@@ -1312,6 +1312,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		return 0;
 	}
 
+	memset(&data, 0, sizeof(struct bankshot2_cache_data));
 	data.file = nvf->fd;
 	data.offset = offset;
 	data.file_length = *file_length;
@@ -1388,7 +1389,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 			data.actual_offset) < (offset + request_len)) {
 		ERROR("Transferred extent does not cover request extent:\n"
 			"Request offset 0x%llx, length %lu;\n"
-			"actual offset 0x%llx, length\n",
+			"actual offset 0x%llx, length %lu\n",
 			offset, request_len,
 			data.actual_offset, data.actual_length);
 	}
