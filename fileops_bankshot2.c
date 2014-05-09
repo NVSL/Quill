@@ -49,6 +49,8 @@ int bankshot2_ctrl_fd;
 #define NVP_LOCK_NODE_WR(nvf)		NVP_LOCK_WR(	   nvf->node->lock)
 #define NVP_UNLOCK_NODE_WR(nvf)		NVP_LOCK_UNLOCK_WR(nvf->node->lock)
 
+#define	NVP_LOCK_NODE_EXTENT_TREE(nvf)		NVP_LOCK_EXTENT_TREE(nvf->node->extent_lock)
+#define	NVP_UNLOCK_NODE_EXTENT_TREE(nvf)	NVP_UNLOCK_EXTENT_TREE(nvf->node->extent_lock)
 
 BOOST_PP_SEQ_FOR_EACH(DECLARE_WITHOUT_ALIAS_FUNCTS_IWRAP, _bankshot2_, ALLOPS_WPAREN)
 
@@ -708,6 +710,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
 			NVP_LOCK_INIT(node->lock);
+			NVP_LOCK_INIT_EXTENT_LOCK(node->extent_lock);
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
@@ -787,7 +790,8 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		if(node==NULL) {
 			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
-			NVP_LOCK_INIT(_bankshot2_fd_lookup[i].lock);
+			NVP_LOCK_INIT(node->lock);
+			NVP_LOCK_INIT_EXTENT_LOCK(node->extent_lock);
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
@@ -1023,7 +1027,6 @@ RETT_READ _bankshot2_READ(INTF_READ)
 	}
 
 	int cpuid = GET_CPUID();
-	nvf->node->lock_id = cpuid;
 
 	RETT_READ result = _bankshot2_check_read_size_valid(length);
 	if (result <= 0)
@@ -1069,7 +1072,6 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 
 	//int iter;
 	int cpuid = GET_CPUID();
-	nvf->node->lock_id = cpuid;
 
 	RETT_WRITE result = _bankshot2_check_write_size_valid(length);
 	if (result <= 0)
@@ -1131,7 +1133,6 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 		return result;
 
 	int cpuid = GET_CPUID();
-	nvf->node->lock_id = cpuid;
 
 	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);
@@ -1163,7 +1164,6 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 		return result;
 	
 	int cpuid = GET_CPUID();
-	nvf->node->lock_id = cpuid;
 
 	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);
@@ -1344,19 +1344,15 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	if (ret == 0) {
 		if (data.mmap_length) {
 			// Acquire node write lock for add_extent
-			if (!wr_lock) {
-				NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-				NVP_LOCK_NODE_WR(nvf);
-			}
+			if (!wr_lock)
+				NVP_LOCK_NODE_EXTENT_TREE(nvf);
 			DEBUG("Add extent: start offset %llu, mmap_addr %llx, length %llu\n",
 					data.mmap_offset, data.mmap_addr,
 					data.mmap_length);
 			add_extent(nvf, data.mmap_offset,
 					data.mmap_length, data.write, data.mmap_addr);
-			if (!wr_lock) {
-				NVP_UNLOCK_NODE_WR(nvf);
-				NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
-			}
+			if (!wr_lock)
+				NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
 		}
 		bankshot2_update_file_length(nvf, data.file_length);
 		ret = 5;
@@ -1565,11 +1561,9 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 				memcpy1(buf, (char *)mmap_addr, extent_length);
 		} else if (segfault == 1) {
 			DEBUG("Pread caught seg fault. Remove extent and try again.\n");
-			NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-			NVP_LOCK_NODE_WR(nvf);
+			NVP_LOCK_NODE_EXTENT_TREE(nvf);
 			remove_extent(nvf, read_offset);
-			NVP_UNLOCK_NODE_WR(nvf);
-			NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
+			NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
 			segfault = 0;
 			do_pread_memcpy = 0;
 			continue;
@@ -1753,54 +1747,6 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
 
-#if 0
-	DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, write_count);
-	ret = find_extent(nvf, &write_offset, &write_count, &mmap_addr);
-	DEBUG("Pwrite: looking for extent returned %d\n", ret);
-	if (ret == 0 || ret == 2) {
-		// Not fully in cache. Add extent.
-		new_buf = (char *)buf;
-		if (ret == 2) {
-			// Copy the covered part first
-			covered_size = write_count - (offset - write_offset);
-			FSYNC_MEMCPY((char *)(mmap_addr + offset - write_offset), buf, covered_size);
-			new_buf += covered_size;
-			write_offset += covered_size;
-			write_count = count - covered_size;
-		}
-
-		copy_to_cache(nvf, new_buf, 0, write_offset, write_count, &mmap_addr);
-		if (mmap_addr == 0)
-			assert(0);
-		// Acquire node write lock for add_extent
-		if (!wr_lock) {
-			NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-			NVP_LOCK_NODE_WR(nvf);
-		}
-		add_extent(nvf, offset, count, 1, mmap_addr);
-		if (!wr_lock) {
-			NVP_UNLOCK_NODE_WR(nvf);
-			NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
-		}
-
-		goto extend;
-	}
-
-//	FSYNC_MEMCPY(nvf->node->data + offset, buf, count);
-	FSYNC_MEMCPY((char *)(mmap_addr + offset - write_offset), buf, count);
-
-extend:
-	if(extension > 0) {
-		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->cache_length, nvf->node->cache_length + extension);
-		nvf->node->cache_length += extension;
-		nvf->node->length += extension;
-	}
-
-	//nvf->offset += count; // NOT IN PWRITE (this happens in write)
-
-	DEBUG("About to return from _bankshot2_PWRITE with ret val %li.  file len: %li, file off: %li, map len: %li, node %p\n", count, nvf->node->cache_length, nvf->offset, nvf->node->maplength, nvf->node);
-#endif
-
 	ssize_t len_to_write = count;
 
 	/* If request extent not in cache, we need to write to cache and add extent */
@@ -1915,15 +1861,11 @@ extend:
 				FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
 		} else if (segfault == 1) {
 			DEBUG("Pwrite caught seg fault. Remove extent and try again.\n");
-			if (!wr_lock) {
-				NVP_UNLOCK_NODE_RD(nvf, nvf->node->lock_id);
-				NVP_LOCK_NODE_WR(nvf);
-			}
+			if (!wr_lock)
+				NVP_LOCK_NODE_EXTENT_TREE(nvf);
 			remove_extent(nvf, write_offset);
-			if (!wr_lock) {
-				NVP_UNLOCK_NODE_WR(nvf);
-				NVP_LOCK_NODE_RD(nvf, nvf->node->lock_id);
-			}
+			if (!wr_lock)
+				NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
 			do_pwrite_memcpy = 0;
 			segfault = 0;
 			continue;
@@ -1983,7 +1925,6 @@ RETT_SEEK64 _bankshot2_SEEK64(INTF_SEEK64)
 	}
 
 	int cpuid = GET_CPUID();
-	nvf->node->lock_id = cpuid;
 
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
@@ -2073,7 +2014,6 @@ RETT_TRUNC64 _bankshot2_TRUNC64(INTF_TRUNC64)
 	}
 
 	int cpuid = GET_CPUID();
-	nvf->node->lock_id = cpuid;
 
 	NVP_LOCK_FD_RD(nvf, cpuid);
 	NVP_CHECK_NVF_VALID(nvf);

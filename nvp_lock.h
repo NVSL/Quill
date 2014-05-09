@@ -47,6 +47,10 @@ static inline int _nvp_get_cpuid(void)
 
 #define NVP_LOCK_INIT(lock) { int iter; for(iter=0; iter<NVP_NUM_LOCKS; iter++) { pthread_rwlock_init(&lock[iter], NULL); } }
 
+#define NVP_EXTENT_LOCK_DECL pthread_rwlock_t extent_lock
+
+#define NVP_LOCK_INIT_EXTENT_LOCK(lock) { pthread_rwlock_init(&lock, NULL); }
+
 #define NVP_LOCK_DO_CHECKING 1
 #if NVP_LOCK_DO_CHECKING
 	#define NVP_LOCK_CHECK(statement) { \
@@ -93,6 +97,12 @@ static inline int _nvp_get_cpuid(void)
 	DEBUG("NVP_WRLOCK released on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	}
 
+#define NVP_LOCK_EXTENT_TREE(lock) \
+	NVP_LOCK_CHECK(pthread_rwlock_wrlock(&lock));
+
+#define NVP_UNLOCK_EXTENT_TREE(lock) \
+	NVP_LOCK_CHECK(pthread_rwlock_unlock(&lock));
+
 
 	//	DEBUG("NVP_WR Locking %i\n", iter);
 	//	DEBUG("NVP_WR Unlocking %i\n", iter);
@@ -107,7 +117,11 @@ static inline int _nvp_get_cpuid(void)
 
 #define NVP_LOCK_INIT(lock) { int iter; for(iter=0; iter<NVP_NUM_LOCKS * 16; iter++) { lock[iter] = 0; } }
 
-	#define NVP_LOCK_CHECK(statement) statement
+#define NVP_EXTENT_LOCK_DECL uint32_t extent_lock
+
+#define NVP_LOCK_INIT_EXTENT_LOCK(lock) { lock = 0; }
+
+#define NVP_LOCK_CHECK(statement) statement
 
 #define SANITY assert
 
@@ -142,6 +156,12 @@ static inline int _nvp_get_cpuid(void)
 	DEBUG("NVP_WRLOCK released on cpu %i, lock %p\n", GET_CPUID(), &lock); \
 	}
 
+#define NVP_LOCK_EXTENT_TREE(lock) \
+		while(!__sync_bool_compare_and_swap(&lock, 0, WR_HELD)) \
+			;
+
+#define NVP_UNLOCK_EXTENT_TREE(lock) \
+		__sync_fetch_and_sub(&lock, WR_HELD);
 
 	//	DEBUG("NVP_WR Locking %i\n", iter);
 	//	DEBUG("NVP_WR Unlocking %i\n", iter);
