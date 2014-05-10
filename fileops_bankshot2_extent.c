@@ -116,26 +116,83 @@ int find_extent(struct NVFile *nvf, off_t *offset, size_t *count,
 /* Add an extent to cache tree */
 /* Must hold Write lock of NVNode */
 /* offset, count and mmap_addr must be aligned to PAGE_SIZE */
-void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write,
+void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 			unsigned long mmap_addr)
 {
 	struct NVNode *node = nvf->node;
 	struct extent_cache_entry *new;
+	const struct extent_cache_entry *nodekey;
 	rb_red_blk_tree *tree = node->extent_tree;
-	rb_red_blk_node *newnode, *prenode;
+	rb_red_blk_node *newnode;
+	rb_red_blk_node *x;
+	rb_red_blk_node *nil;
+	int count, i;
+	off_t extent_offset;
+	size_t extent_length;
+	unsigned long extent_mmap_addr;
+	int compVal;
 
-	new = malloc(sizeof(struct extent_cache_entry));
-	if (!new)
+	/* Break the extent to 2MB chunks */
+	if (offset != ALIGN_DOWN(offset) || length != ALIGN_DOWN(length)) {
+		ERROR("%s: offset or length not aligned to mmap unit size! "
+			"offset 0x%lx, length %lu\n", offset, length);
 		assert(0);
+	}
 
-	new->offset = offset; 
-	new->count = count;
-	new->dirty = write; 
-	new->next = NULL;
-	new->dirty = write;
-	new->mmap_addr = mmap_addr;
+	nil = tree->nil;
+	count = length / MMAP_UNIT;
 
-	newnode = RBTreeInsert(tree, new, NULL);
+	for (i = 0; i < count; i++) {
+		x = tree->root->left;
+
+		extent_offset = offset + i * MMAP_UNIT;
+		extent_length = MMAP_UNIT;
+		extent_mmap_addr = mmap_addr + i * MMAP_UNIT;
+
+		if (x == nil)
+			goto insert;
+
+		compVal = extent_rbtree_compare_find(x->key, extent_offset);
+		while (compVal) {
+			if (compVal == 1)
+				x = x->left;
+			else
+				x = x->right;
+
+			if (x == nil)
+				goto insert;
+
+			compVal = extent_rbtree_compare_find(x->key,
+					extent_offset);
+		}
+
+		/* Found existing extent */
+		nodekey = (const struct extent_cache_entry *)(x->key);
+		ERROR("%s: Found existing extent: "
+			"insert offset 0x%lx, length %lu, mmap_addr 0x%lx, "
+			"existing offset 0x%lx, length %lu, mmap_addr 0x%lx\n",
+			__func__, extent_offset, extent_length,
+			extent_mmap_addr, nodekey->offset, nodekey->count,
+			nodekey->mmap_addr);
+		continue;
+
+insert:
+		new = malloc(sizeof(struct extent_cache_entry));
+		if (!new)
+			assert(0);
+
+		new->offset = extent_offset; 
+		new->count = extent_length;
+		new->dirty = write; 
+		new->next = NULL;
+		new->dirty = write;
+		new->mmap_addr = extent_mmap_addr;
+
+		newnode = RBTreeInsert(tree, new, NULL);
+		if (!newnode)
+			assert(0);
+	}
+#if 0
 	prenode = TreePredecessor(tree, newnode);
 	if (prenode != tree->nil) {
 		struct extent_cache_entry *prev = prenode->key;
@@ -179,6 +236,7 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t count, int write,
 			break;
 		}
 	}
+#endif
 }
 
 void remove_extent(struct NVFile *nvf, off_t offset)
