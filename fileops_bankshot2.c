@@ -974,6 +974,11 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 //	_bankshot2_fileops->CLOSE(nvf->cache_fd);
 	RETT_CLOSE result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
 
+	DEBUG("Send IOCTL_REMOVE_MAPPING request\n");
+	uint64_t cache_ino = nvf->cache_serialno;
+	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
+				BANKSHOT2_IOCTL_REMOVE_MAPPING, &cache_ino);
+
 	NVP_UNLOCK_NODE_WR(nvf);
 	NVP_UNLOCK_FD_WR(nvf);
 
