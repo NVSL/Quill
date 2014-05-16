@@ -1565,7 +1565,8 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 //			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
 				memcpy1(buf, (char *)mmap_addr, extent_length);
 		} else if (segfault == 1) {
-			DEBUG("Pread caught seg fault. Remove extent and try again.\n");
+			ERROR("Pread caught seg fault. Remove extent 0x%llx "
+				"and try again.\n", read_offset);
 			NVP_LOCK_NODE_EXTENT_TREE(nvf);
 			remove_extent(nvf, read_offset);
 			NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
@@ -1799,6 +1800,9 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 		DEBUG("Pwrite: get_extent returned %d\n", ret);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
+//			if ((write_offset % 2097152) == 0)
+//				ERROR("Pwrite: write_offset %u, mmap addr 0x%llx, length %u\n",
+//					write_offset, mmap_addr, len_to_write);
 			break;
 		case 1:	// We have some big troubles.
 			return write_count;
@@ -1865,7 +1869,8 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 //			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
 				FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
 		} else if (segfault == 1) {
-			DEBUG("Pwrite caught seg fault. Remove extent and try again.\n");
+			ERROR("Pwrite caught seg fault. Remove extent 0x%llx "
+				"and try again.\n", write_offset);
 			if (!wr_lock)
 				NVP_LOCK_NODE_EXTENT_TREE(nvf);
 			remove_extent(nvf, write_offset);
@@ -2716,7 +2721,7 @@ void _bankshot2_SIGBUS_handler(int sig)
 
 void _bankshot2_SIGSEGV_handler(int sig)
 {
-	ERROR("We got a SIGSEGV (sig %i)!  This almost certainly means someone tried to access an area inside an mmaped region but past the length of the mmapped file.\n", sig);
+	DEBUG("We got a SIGSEGV (sig %i)!  This almost certainly means someone tried to access an area inside an mmaped region but past the length of the mmapped file.\n", sig);
 	#if MANUAL_PREFAULT
 //	ERROR("   OR if this happened during prefault, we probably just tried to prefault a hole in the file, which isn't going to work.\n");
 	#endif
