@@ -139,6 +139,7 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 		assert(0);
 	}
 
+	DEBUG("Add extent offset 0x%lx, length %lu\n", offset, length);
 	nil = tree->nil;
 	count = length / MMAP_UNIT;
 
@@ -266,6 +267,7 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 		compVal = extent_rbtree_compare_find(x->key, offset);
 	}
 
+	DEBUG("Remove extent offset 0x%lx\n", offset);
 	RBDelete(tree, x);
 	return;
 }

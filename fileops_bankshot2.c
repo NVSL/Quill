@@ -378,6 +378,15 @@ long long unsigned int total_memcpy_cycles = 0;
 void report_memcpy_usec(void) { printf("Total memcpy time: %llu cycles: %f seconds\n", total_memcpy_cycles, ((float)(total_memcpy_cycles))/(2.27f*1024*1024*1024) ); }
 #endif
 
+void bankshot2_setup_signal_handler(void)
+{
+	struct sigaction act, oact;
+	act.sa_handler = _bankshot2_SIGSEGV_handler;
+	act.sa_flags = SA_NODEFER;
+
+	sigaction(SIGSEGV, &act, &oact);
+}
+
 void _bankshot2_init2(void)
 {
 	#if TIME_READ_MEMCPY
@@ -413,12 +422,7 @@ void _bankshot2_init2(void)
 	DEBUG("Installing SIGBUS handler.\n");
 	signal(SIGBUS, _bankshot2_SIGBUS_handler);
 
-	struct sigaction act, oact;
-	act.sa_handler = _bankshot2_SIGSEGV_handler;
-	act.sa_flags = SA_NODEFER;
-
-	sigaction(SIGSEGV, &act, &oact);
-
+	bankshot2_setup_signal_handler();
 	//TODO
 	/*
 	#define GLIBC_LOC ""
@@ -1572,6 +1576,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 			NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
 			segfault = 0;
 			do_pread_memcpy = 0;
+			bankshot2_setup_signal_handler();
 			continue;
 		}
 
@@ -1878,6 +1883,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 				NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
 			do_pwrite_memcpy = 0;
 			segfault = 0;
+			bankshot2_setup_signal_handler();
 			continue;
 		}
 
