@@ -1270,7 +1270,7 @@ void cache_write_back(struct NVFile *nvf)
 	MSG("%s: write back cache fd %d to fd %d\n", __func__,
 						nvf->fd, nvf->fd);
 
-//	RBTreePrint(nvf->node->extent_tree);
+	RBTreePrint(nvf->node->extent_tree);
 
 	while (first_extent(nvf, &write_offset, &write_count, &dirty,
 			&mmap_addr) == 1)
@@ -1569,14 +1569,14 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 //			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
 				memcpy1(buf, (char *)mmap_addr, extent_length);
 		} else if (segfault == 1) {
+			segfault = 0;
+			bankshot2_setup_signal_handler();
 			ERROR("Pread caught seg fault. Remove extent 0x%llx "
 				"and try again.\n", read_offset);
 			NVP_LOCK_NODE_EXTENT_TREE(nvf);
 			remove_extent(nvf, read_offset);
 			NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
-			segfault = 0;
 			do_pread_memcpy = 0;
-			bankshot2_setup_signal_handler();
 			continue;
 		}
 
@@ -1874,6 +1874,8 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 //			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
 				FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
 		} else if (segfault == 1) {
+			segfault = 0;
+			bankshot2_setup_signal_handler();
 			ERROR("Pwrite caught seg fault. Remove extent 0x%llx "
 				"and try again.\n", write_offset);
 			if (!wr_lock)
@@ -1882,8 +1884,6 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 			if (!wr_lock)
 				NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
 			do_pwrite_memcpy = 0;
-			segfault = 0;
-			bankshot2_setup_signal_handler();
 			continue;
 		}
 
