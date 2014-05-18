@@ -1351,15 +1351,22 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		data.extent_length);
 
 	if (ret == 0) {
-		if (data.mmap_length) {
+		if (data.mmap_length || data.evict_length) {
 			// Acquire node write lock for add_extent
 			if (!wr_lock)
 				NVP_LOCK_NODE_EXTENT_TREE(nvf);
-			DEBUG("Add extent: start offset %llu, mmap_addr %llx, length %llu\n",
+			if (data.evict_length) {
+				DEBUG("Remove extent: start offset %llu, length %llu\n",
+					data.evict_offset, data.evict_length);
+				remove_extent(nvf, data.evict_offset);
+			}
+			if (data.mmap_length) {
+				DEBUG("Add extent: start offset %llu, mmap_addr %llx, length %llu\n",
 					data.mmap_offset, data.mmap_addr,
 					data.mmap_length);
-			add_extent(nvf, data.mmap_offset,
+				add_extent(nvf, data.mmap_offset,
 					data.mmap_length, data.write, data.mmap_addr);
+			}
 			if (!wr_lock)
 				NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
 		}
