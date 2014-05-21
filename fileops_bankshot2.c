@@ -1270,7 +1270,7 @@ void cache_write_back(struct NVFile *nvf)
 	MSG("%s: write back cache fd %d to fd %d\n", __func__,
 						nvf->fd, nvf->fd);
 
-	RBTreePrint(nvf->node->extent_tree);
+//	RBTreePrint(nvf->node->extent_tree);
 
 	while (first_extent(nvf, &write_offset, &write_count, &dirty,
 			&mmap_addr) == 1)
