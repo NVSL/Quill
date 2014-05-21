@@ -49,8 +49,6 @@ int bankshot2_ctrl_fd;
 #define NVP_LOCK_NODE_WR(nvf)		NVP_LOCK_WR(	   nvf->node->lock)
 #define NVP_UNLOCK_NODE_WR(nvf)		NVP_LOCK_UNLOCK_WR(nvf->node->lock)
 
-#define	NVP_LOCK_NODE_EXTENT_TREE(nvf)		NVP_LOCK_EXTENT_TREE(nvf->node->extent_lock)
-#define	NVP_UNLOCK_NODE_EXTENT_TREE(nvf)	NVP_UNLOCK_EXTENT_TREE(nvf->node->extent_lock)
 
 BOOST_PP_SEQ_FOR_EACH(DECLARE_WITHOUT_ALIAS_FUNCTS_IWRAP, _bankshot2_, ALLOPS_WPAREN)
 
@@ -71,8 +69,8 @@ void _bankshot2_SIGSEGV_handler(int sig);
 void _bankshot2_test_invalidate_node(struct NVFile* nvf);
 void cache_write_back(struct NVFile *nvf);
 
-RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE); // like PWRITE, but without locks (called by _bankshot2_WRITE)
-RETT_PWRITE _bankshot2_do_pread (INTF_PREAD ); // like PREAD , but without locks (called by _bankshot2_READ )
+RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like PWRITE, but without locks (called by _bankshot2_WRITE)
+RETT_PWRITE _bankshot2_do_pread (INTF_PREAD, int cpuid); // like PREAD , but without locks (called by _bankshot2_READ )
 RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_write
 
 #define DO_MSYNC(nvf) do{ \
@@ -714,7 +712,6 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
 			NVP_LOCK_INIT(node->lock);
-			NVP_LOCK_INIT_EXTENT_LOCK(node->extent_lock);
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
@@ -795,7 +792,6 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
 			NVP_LOCK_INIT(node->lock);
-			NVP_LOCK_INIT_EXTENT_LOCK(node->extent_lock);
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
@@ -1046,7 +1042,7 @@ RETT_READ _bankshot2_READ(INTF_READ)
 
 	NVP_LOCK_NODE_RD(nvf, cpuid);
 
-	result = _bankshot2_do_pread(CALL_READ, __sync_fetch_and_add(nvf->offset, length));
+	result = _bankshot2_do_pread(CALL_READ, __sync_fetch_and_add(nvf->offset, length), cpuid);
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	
@@ -1090,7 +1086,7 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid); //TODO
 
-	result = _bankshot2_do_pwrite(0, CALL_WRITE, __sync_fetch_and_add(nvf->offset, length));
+	result = _bankshot2_do_pwrite(CALL_WRITE, __sync_fetch_and_add(nvf->offset, length), 0, cpuid);
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 
@@ -1147,7 +1143,7 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 	NVP_CHECK_NVF_VALID(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid);
 
-	result = _bankshot2_do_pread(CALL_PREAD);
+	result = _bankshot2_do_pread(CALL_PREAD, cpuid);
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
@@ -1185,12 +1181,12 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 		NVP_LOCK_NODE_WR(nvf);
 		
-		result = _bankshot2_do_pwrite(1, CALL_PWRITE);
+		result = _bankshot2_do_pwrite(CALL_PWRITE, 1, cpuid);
 
 		NVP_UNLOCK_NODE_WR(nvf);
 	}
 	else {
-		result = _bankshot2_do_pwrite(0, CALL_PWRITE);
+		result = _bankshot2_do_pwrite(CALL_PWRITE, 0, cpuid);
 		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	}
 
@@ -1297,7 +1293,8 @@ inline void bankshot2_update_file_length(struct NVFile *nvf, size_t file_length)
  */
 int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				size_t *extent_length, unsigned long *mmap_addr,
-				size_t *file_length, int rnw, char *buf, int wr_lock)
+				size_t *file_length, int rnw, char *buf,
+				int wr_lock, int cpuid)
 {
 	int ret, feret;
 	off_t cached_extent_offset;
@@ -1353,8 +1350,10 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	if (ret == 0) {
 		if (data.mmap_length || data.evict_length) {
 			// Acquire node write lock for add_extent
-			if (!wr_lock)
-				NVP_LOCK_NODE_EXTENT_TREE(nvf);
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_RD(nvf, cpuid);
+				NVP_LOCK_NODE_WR(nvf);
+			}
 			if (data.evict_length) {
 				DEBUG("Remove extent: start offset %llu, length %llu\n",
 					data.evict_offset, data.evict_length);
@@ -1367,8 +1366,10 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				add_extent(nvf, data.mmap_offset,
 					data.mmap_length, data.write, data.mmap_addr);
 			}
-			if (!wr_lock)
-				NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_WR(nvf);
+				NVP_LOCK_NODE_RD(nvf, cpuid);
+			}
 		}
 		bankshot2_update_file_length(nvf, data.file_length);
 		ret = 5;
@@ -1416,7 +1417,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	return ret;
 }
 /* Read lock of nvf and node are held */
-RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
+RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 {
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
@@ -1517,7 +1518,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 		DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, len_to_read);
 		file_length = len_to_read;
 		ret = bankshot2_get_extent(nvf, read_offset, &extent_length, &mmap_addr,
-						&file_length, READ_EXTENT, buf, 0);
+						&file_length, READ_EXTENT, buf, 0, cpuid);
 		DEBUG("Pread: get_extent returned %d\n", ret);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
@@ -1580,9 +1581,11 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD)
 			bankshot2_setup_signal_handler();
 			ERROR("Pread caught seg fault. Remove extent 0x%llx "
 				"and try again.\n", read_offset);
-			NVP_LOCK_NODE_EXTENT_TREE(nvf);
+			NVP_UNLOCK_NODE_RD(nvf, cpuid);
+			NVP_LOCK_NODE_WR(nvf);
 			remove_extent(nvf, read_offset);
-			NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
+			NVP_UNLOCK_NODE_WR(nvf);
+			NVP_LOCK_NODE_RD(nvf, cpuid);
 			do_pread_memcpy = 0;
 			continue;
 		}
@@ -1614,7 +1617,7 @@ update_length:
 }
 
 
-RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
+RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 {
 	int ret = 0;
 	int segfault;
@@ -1808,7 +1811,7 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 		DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, len_to_write);
 		file_length = len_to_write;
 		ret = bankshot2_get_extent(nvf, write_offset, &extent_length, &mmap_addr,
-						&file_length, WRITE_EXTENT, new_buf, wr_lock);
+						&file_length, WRITE_EXTENT, new_buf, wr_lock, cpuid);
 		DEBUG("Pwrite: get_extent returned %d\n", ret);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
@@ -1885,11 +1888,15 @@ RETT_PWRITE _bankshot2_do_pwrite(int wr_lock, INTF_PWRITE)
 			bankshot2_setup_signal_handler();
 			ERROR("Pwrite caught seg fault. Remove extent 0x%llx "
 				"and try again.\n", write_offset);
-			if (!wr_lock)
-				NVP_LOCK_NODE_EXTENT_TREE(nvf);
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_RD(nvf, cpuid);
+				NVP_LOCK_NODE_WR(nvf);
+			}
 			remove_extent(nvf, write_offset);
-			if (!wr_lock)
-				NVP_UNLOCK_NODE_EXTENT_TREE(nvf);
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_WR(nvf);
+				NVP_LOCK_NODE_RD(nvf, cpuid);
+			}
 			do_pwrite_memcpy = 0;
 			continue;
 		}

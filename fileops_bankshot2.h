@@ -89,7 +89,7 @@ struct NVNode
 	volatile size_t cache_length;
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
 	void *extent_tree;
-	NVP_EXTENT_LOCK_DECL;
+//	NVP_EXTENT_LOCK_DECL;
 };
 
 struct extent_cache_entry
