@@ -966,7 +966,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_WR(nvf);
 
-	cache_write_back(nvf);
+//	cache_write_back(nvf);
 	nvf->valid = 0;
 
 	//_bankshot2_test_invalidate_node(nvf);
