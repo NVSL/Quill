@@ -519,7 +519,7 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 		return result;
 	}	
 
-	printf("_bankshot2_get_cache_inode succeeded for path %s: fd %llu returned.\n", path, data.cache_ino);
+	DEBUG("_bankshot2_get_cache_inode succeeded for path %s: fd %llu returned.\n", path, data.cache_ino);
 
 	node->maplength = 0;
 	node->cache_serialno = data.cache_ino;
