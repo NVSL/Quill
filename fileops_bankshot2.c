@@ -2069,7 +2069,7 @@ RETT_TRUNC64 _bankshot2_TRUNC64(INTF_TRUNC64)
 
 	DO_MSYNC(nvf);
 
-	assert(!munmap(nvf->node->data, nvf->node->maplength));
+//	assert(!munmap(nvf->node->data, nvf->node->maplength));
 
 	int result = _bankshot2_fileops->TRUNC64(CALL_TRUNC64);
 
@@ -2090,7 +2090,7 @@ RETT_TRUNC64 _bankshot2_TRUNC64(INTF_TRUNC64)
 
 	DEBUG("Done with trunc, we better update map!\n");
 
-	_bankshot2_extend_map(nvf, length);
+//	_bankshot2_extend_map(nvf, length);
 
 	nvf->node->length = length;
 
