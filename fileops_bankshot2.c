@@ -525,7 +525,8 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	node->cache_serialno = data.cache_ino;
 	node->cache_length = data.cache_file_size;
 
-	bankshot2_setup_extent_tree(node);
+	if (!node->extent_tree)
+		bankshot2_setup_extent_tree(node);
 
 	nvf->cache_serialno = data.cache_ino;
 
