@@ -975,10 +975,10 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 //	_bankshot2_fileops->CLOSE(nvf->cache_fd);
 	RETT_CLOSE result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
 
-	DEBUG("Send IOCTL_REMOVE_MAPPING request\n");
-	uint64_t cache_ino = nvf->cache_serialno;
-	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
-				BANKSHOT2_IOCTL_REMOVE_MAPPING, &cache_ino);
+//	DEBUG("Send IOCTL_REMOVE_MAPPING request\n");
+//	uint64_t cache_ino = nvf->cache_serialno;
+//	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
+//				BANKSHOT2_IOCTL_REMOVE_MAPPING, &cache_ino);
 
 	NVP_UNLOCK_NODE_WR(nvf);
 	NVP_UNLOCK_FD_WR(nvf);
@@ -1575,12 +1575,12 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 #else
 			void* result =
 #endif
-//			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
+//				memcpy(buf, (char *)mmap_addr, extent_length);
 				memcpy1(buf, (char *)mmap_addr, extent_length);
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
-			ERROR("Pread caught seg fault. Remove extent 0x%llx "
+			MSG("Pread caught seg fault. Remove extent 0x%llx "
 				"and try again.\n", read_offset);
 			NVP_UNLOCK_NODE_RD(nvf, cpuid);
 			NVP_LOCK_NODE_WR(nvf);
@@ -1887,7 +1887,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
-			ERROR("Pwrite caught seg fault. Remove extent 0x%llx "
+			MSG("Pwrite caught seg fault. Remove extent 0x%llx "
 				"and try again.\n", write_offset);
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_RD(nvf, cpuid);
