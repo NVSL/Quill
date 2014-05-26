@@ -1955,16 +1955,17 @@ RETT_SEEK64 _bankshot2_SEEK64(INTF_SEEK64)
 		return _bankshot2_fileops->SEEK64(CALL_SEEK64);
 	}
 
-	int cpuid = GET_CPUID();
+	/* Use atomic operation to update offset */
+//	int cpuid = GET_CPUID();
 
-	NVP_LOCK_FD_WR(nvf);
-	NVP_CHECK_NVF_VALID_WR(nvf);
-	NVP_LOCK_NODE_RD(nvf, cpuid);
+//	NVP_LOCK_FD_WR(nvf);
+//	NVP_CHECK_NVF_VALID_WR(nvf);
+//	NVP_LOCK_NODE_RD(nvf, cpuid);
 
 	RETT_SEEK64 result =  _bankshot2_do_seek64(CALL_SEEK64);	
 
-	NVP_UNLOCK_NODE_RD(nvf, cpuid);
-	NVP_UNLOCK_FD_WR(nvf);
+//	NVP_UNLOCK_NODE_RD(nvf, cpuid);
+//	NVP_UNLOCK_FD_WR(nvf);
 
 	return result;
 }
@@ -1993,13 +1994,13 @@ RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64)
 			return *(nvf->offset);
 
 		case SEEK_CUR:
-			if((*(nvf->offset) + offset) < 0)
+			if((__sync_fetch_and_add(nvf->offset, 0) + offset) < 0)
 			{
 				DEBUG("offset out of range (would result in negative offset).\n");
 				errno = EINVAL;
 				return -1;
 			}
-			*(nvf->offset) += offset ;
+			__sync_fetch_and_add(nvf->offset, offset);
 			return *(nvf->offset);
 
 		case SEEK_END:
