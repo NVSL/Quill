@@ -139,6 +139,11 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 		assert(0);
 	}
 
+	if (length > MAX_MMAP_SIZE) {
+		ERROR("%s: length larger than 2MB! length %lu\n", length);
+		assert(0);
+	}
+
 	DEBUG("Add extent offset 0x%lx, length %lu\n", offset, length);
 	nil = tree->nil;
 	count = length / MMAP_UNIT;

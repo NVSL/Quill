@@ -51,9 +51,11 @@
 		return -1; \
 	} }while(0)
 
-/* Default mmap size : 2MB */
+/* Default mmap size : PAGE_SIZE */
 
-#define MMAP_UNIT	2097152
+#define PAGE_SIZE	4096
+#define MMAP_UNIT	PAGE_SIZE
+#define MAX_MMAP_SIZE	2097152
 
 #define ALIGN_DOWN(addr) ((addr) & ~(MMAP_UNIT - 1))
 #define ALIGN_UP(addr) (((addr) & (MMAP_UNIT - 1)) ? \
