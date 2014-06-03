@@ -123,10 +123,9 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 	struct extent_cache_entry *new;
 	const struct extent_cache_entry *nodekey;
 	rb_red_blk_tree *tree = node->extent_tree;
-	rb_red_blk_node *newnode;
+	rb_red_blk_node *newnode, *sucnode;
 	rb_red_blk_node *x;
 	rb_red_blk_node *nil;
-	int count, i;
 	off_t extent_offset;
 	size_t extent_length;
 	unsigned long extent_mmap_addr;
@@ -146,57 +145,69 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 
 	DEBUG("Add extent offset 0x%lx, length %lu\n", offset, length);
 	nil = tree->nil;
-	count = length / MMAP_UNIT;
 
-	for (i = 0; i < count; i++) {
-		x = tree->root->left;
+	x = tree->root->left;
 
-		extent_offset = offset + i * MMAP_UNIT;
-		extent_length = MMAP_UNIT;
-		extent_mmap_addr = mmap_addr + i * MMAP_UNIT;
+	extent_offset = offset;
+	extent_length = length;
+	extent_mmap_addr = mmap_addr;
+
+	if (x == nil)
+		goto insert;
+
+	compVal = extent_rbtree_compare_find(x->key, extent_offset);
+	while (compVal) {
+		if (compVal == 1)
+			x = x->left;
+		else
+			x = x->right;
 
 		if (x == nil)
 			goto insert;
 
-		compVal = extent_rbtree_compare_find(x->key, extent_offset);
-		while (compVal) {
-			if (compVal == 1)
-				x = x->left;
-			else
-				x = x->right;
-
-			if (x == nil)
-				goto insert;
-
-			compVal = extent_rbtree_compare_find(x->key,
-					extent_offset);
-		}
+		compVal = extent_rbtree_compare_find(x->key,
+				extent_offset);
+	}
 
 		/* Found existing extent */
-		nodekey = (const struct extent_cache_entry *)(x->key);
-		ERROR("%s: Found existing extent: "
-			"insert offset 0x%lx, length %lu, mmap_addr 0x%lx, "
-			"existing offset 0x%lx, length %lu, mmap_addr 0x%lx\n",
-			__func__, extent_offset, extent_length,
-			extent_mmap_addr, nodekey->offset, nodekey->count,
-			nodekey->mmap_addr);
-		continue;
+	nodekey = (const struct extent_cache_entry *)(x->key);
+	ERROR("%s: Found existing extent: "
+		"insert offset 0x%lx, length %lu, mmap_addr 0x%lx, "
+		"existing offset 0x%lx, length %lu, mmap_addr 0x%lx\n",
+		__func__, extent_offset, extent_length,
+		extent_mmap_addr, nodekey->offset, nodekey->count,
+		nodekey->mmap_addr);
+	return;
 
 insert:
-		new = malloc(sizeof(struct extent_cache_entry));
-		if (!new)
-			assert(0);
+	new = malloc(sizeof(struct extent_cache_entry));
+	if (!new)
+		assert(0);
 
-		new->offset = extent_offset; 
-		new->count = extent_length;
-		new->dirty = write; 
-		new->next = NULL;
-		new->dirty = write;
-		new->mmap_addr = extent_mmap_addr;
+	new->offset = extent_offset; 
+	new->count = extent_length;
+	new->dirty = write; 
+	new->next = NULL;
+	new->dirty = write;
+	new->mmap_addr = extent_mmap_addr;
 
-		newnode = RBTreeInsert(tree, new, NULL);
-		if (!newnode)
-			assert(0);
+	newnode = RBTreeInsert(tree, new, NULL);
+	if (!newnode)
+		assert(0);
+
+	sucnode = TreeSuccessor(tree, newnode);
+	if (sucnode != tree->nil) {
+		struct extent_cache_entry *next = sucnode->key;
+		if (new->offset + new->count > next->offset) {
+			ERROR("%s: insert extent overlaps "
+				"with existing extent: insert offset 0x%lx, "
+				"length %lu, mmap_addr 0x%lx, existing offset "
+				"0x%lx, length %lu, mmap_addr 0x%lx\n",
+				__func__, extent_offset, extent_length,
+				extent_mmap_addr, next->offset, next->count,
+				next->mmap_addr);
+			new->count = next->offset - new->offset;
+		}
 	}
 #if 0
 	prenode = TreePredecessor(tree, newnode);
