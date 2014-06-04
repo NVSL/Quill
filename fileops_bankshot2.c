@@ -372,6 +372,7 @@ void *memcpy_fsync_flush_on_write(void *dest, const void *src, size_t n)
 long long unsigned int total_memcpy_cycles = 0;
 void report_memcpy_usec(void) { printf("Total memcpy time: %llu cycles: %f seconds\n", total_memcpy_cycles, ((float)(total_memcpy_cycles))/(2.27f*1024*1024*1024) ); }
 #endif
+void bankshot2_clear_mappings(void);
 
 void bankshot2_setup_signal_handler(void)
 {
@@ -385,7 +386,7 @@ void bankshot2_setup_signal_handler(void)
 void _bankshot2_init2(void)
 {
 	#if TIME_READ_MEMCPY
-	atexit(report_memcpy_usec);
+//	atexit(report_memcpy_usec);
 	#endif
 #if 0
 	cache_path = getenv("CACHE_PATH");      
@@ -432,6 +433,7 @@ void _bankshot2_init2(void)
 		assert(0);
 	}
 #endif
+	atexit(bankshot2_clear_mappings);
 }
 
 #if COUNT_EXTENDS
@@ -588,6 +590,24 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	DO_MSYNC(nvf);
 
 	return nvf->cache_serialno;
+}
+
+void bankshot2_clear_mappings(void)
+{
+	struct NVFile *nvf;
+	int i;
+	uint64_t cache_ino;
+
+	for (i = 0; i < OPEN_MAX; i++) {
+		nvf = &_bankshot2_fd_lookup[i];
+		cache_ino = nvf->cache_serialno;
+		if (cache_ino) {
+			_bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
+				BANKSHOT2_IOCTL_REMOVE_MAPPING, &cache_ino);
+		}
+	}
+
+	_bankshot2_fileops->CLOSE(bankshot2_ctrl_fd);
 }
 
 RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
