@@ -171,12 +171,14 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 
 		/* Found existing extent */
 	nodekey = (const struct extent_cache_entry *)(x->key);
-	ERROR("%s: Found existing extent: "
-		"insert offset 0x%lx, length %lu, mmap_addr 0x%lx, "
-		"existing offset 0x%lx, length %lu, mmap_addr 0x%lx\n",
-		__func__, extent_offset, extent_length,
-		extent_mmap_addr, nodekey->offset, nodekey->count,
-		nodekey->mmap_addr);
+	if (extent_offset != nodekey->offset || extent_length != nodekey->count
+				|| extent_mmap_addr != nodekey->mmap_addr)
+		ERROR("%s: Found unmatch existing extent: "
+			"insert offset 0x%lx, length %lu, mmap_addr 0x%lx, "
+			"existing offset 0x%lx, length %lu, mmap_addr 0x%lx\n",
+			__func__, extent_offset, extent_length,
+			extent_mmap_addr, nodekey->offset, nodekey->count,
+			nodekey->mmap_addr);
 	return;
 
 insert:
