@@ -524,8 +524,10 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	node->cache_serialno = data.cache_ino;
 	node->cache_length = data.cache_file_size;
 
-	if (node->num_extents == 0)
+	if (node->num_extents == 0) {
 		node->extent_tree = RB_ROOT;
+		node->mmap_extent_tree = RB_ROOT;
+	}
 
 //	bankshot2_print_extent_tree(node);
 
@@ -1366,24 +1368,17 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		data.extent_length);
 
 	if (ret == 0) {
-		if (data.mmap_length || data.evict_length) {
+		if (data.mmap_length) {
 			// Acquire node write lock for add_extent
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_RD(nvf, cpuid);
 				NVP_LOCK_NODE_WR(nvf);
 			}
-			if (data.evict_length) {
-				DEBUG("Remove extent: start offset %llu, length %llu\n",
-					data.evict_offset, data.evict_length);
-				remove_extent(nvf, data.evict_offset);
-			}
-			if (data.mmap_length) {
-				DEBUG("Add extent: start offset %llu, mmap_addr %llx, length %llu\n",
-					data.mmap_offset, data.mmap_addr,
-					data.mmap_length);
-				add_extent(nvf, data.mmap_offset,
-					data.mmap_length, data.write, data.mmap_addr);
-			}
+			DEBUG("Add extent: start offset 0x%llx, mmap_addr 0x%llx, length %llu\n",
+				data.mmap_offset, data.mmap_addr,
+				data.mmap_length);
+			add_extent(nvf, data.mmap_offset,
+				data.mmap_length, data.write, data.mmap_addr);
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_WR(nvf);
 				NVP_LOCK_NODE_RD(nvf, cpuid);

@@ -82,6 +82,7 @@ struct NVFile
 struct NVNode
 {
 	struct rb_root extent_tree;
+	struct rb_root mmap_extent_tree;
 	int num_extents;
 	ino_t serialno;
 	NVP_LOCK_DECL;
@@ -98,6 +99,7 @@ struct NVNode
 struct extent_cache_entry
 {
 	struct rb_node node;
+	struct rb_node mmap_node;
 	off_t offset;
 	size_t count;
 	int dirty;

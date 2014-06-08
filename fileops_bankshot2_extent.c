@@ -22,6 +22,19 @@ int extent_rbtree_compare_find(struct extent_cache_entry *curr,
 	return 0;
 }
 
+int mmap_rbtree_compare_find(struct extent_cache_entry *curr,
+		unsigned long mmap_addr)
+{
+	if ((curr->mmap_addr <= mmap_addr) &&
+			(curr->mmap_addr + curr->count > mmap_addr))
+		return 0;
+
+	if (mmap_addr < curr->mmap_addr) return -1;
+	if (mmap_addr > curr->mmap_addr) return 1;
+
+	return 0;
+}
+
 void extent_rbtree_printkey(struct extent_cache_entry *current)
 {
 	MSG("0x%.16llx to 0x%.16llx %d, mmap addr %lx\n", current->offset,
@@ -55,6 +68,7 @@ void bankshot2_cleanup_extent_tree(struct NVNode *node)
 		curr = container_of(temp, struct extent_cache_entry, node);
 		temp = rb_next(temp);
 		rb_erase(&curr->node, &node->extent_tree);
+		rb_erase(&curr->mmap_node, &node->mmap_extent_tree);
 		free(curr);
 	}
 
@@ -173,11 +187,10 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 
 	rb_link_node(&new->node, parent, temp);
 	rb_insert_color(&new->node, &node->extent_tree);
-	node->num_extents++;
 
 	next_node = rb_next(&new->node);
 	if (!next_node)
-		return;
+		goto mmap_tree;
 
 	next = container_of(next_node, struct extent_cache_entry, node);
 	if (new->offset + new->count > next->offset) {
@@ -191,7 +204,75 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 		new->count = next->offset - new->offset;
 	}
 
+mmap_tree:
+	/*
+	 * Now insert to the mmap rbtree.
+	 * If find the existing mmap_addr but not the same offset,
+	 * it means the old mapping needs to be removed, as two different
+	 * offset cannot have the same mmap address.
+	 */
+	temp = &(node->mmap_extent_tree.rb_node);
+	parent = NULL;
+
+	while (*temp) {
+		curr = container_of(*temp, struct extent_cache_entry,
+					mmap_node);
+		compVal = mmap_rbtree_compare_find(curr, extent_mmap_addr);
+
+		if (compVal == -1) {
+			temp = &((*temp)->rb_left);
+		} else if (compVal == 1) {
+			temp = &((*temp)->rb_right);
+		} else { 
+			/* Found existing extent */
+			if (extent_offset != curr->offset) {
+//					&& extent_mmap_addr == curr->mmap_addr) {
+				DEBUG("Remove extent: start offset 0x%llx, "
+					"mmap_addr 0x%llx, length %llu\n",
+					curr->offset, curr->mmap_addr,
+					curr->count);
+				rb_erase(&curr->node, &node->extent_tree);
+				rb_erase(&curr->mmap_node,
+						&node->mmap_extent_tree);
+				free(curr);
+				node->num_extents--;
+			}
+			break;
+		}
+	}
+
+	temp = &(node->mmap_extent_tree.rb_node);
+	parent = NULL;
+
+	while (*temp) {
+		curr = container_of(*temp, struct extent_cache_entry,
+					mmap_node);
+		compVal = mmap_rbtree_compare_find(curr, extent_mmap_addr);
+
+		parent = *temp;
+
+		if (compVal == -1) {
+			temp = &((*temp)->rb_left);
+		} else if (compVal == 1) {
+			temp = &((*temp)->rb_right);
+		} else { 
+			ERROR("%s: Existing extent with same mmap address: "
+				"insert offset 0x%lx, length %lu, "
+				"mmap_addr 0x%lx, existing offset "
+				"0x%lx, length %lu, mmap_addr 0x%lx\n",
+				__func__, extent_offset, extent_length,
+				extent_mmap_addr, curr->offset,
+				curr->count, curr->mmap_addr);
+//			assert(0);
+		}
+	}
+
+	rb_link_node(&new->mmap_node, parent, temp);
+	rb_insert_color(&new->mmap_node, &node->mmap_extent_tree);
+
+	node->num_extents++;
 	return;
+
 #if 0
 	prenode = TreePredecessor(tree, newnode);
 	if (prenode != tree->nil) {
@@ -257,6 +338,7 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 			temp = temp->rb_right;
 		} else {
 			rb_erase(&curr->node, &node->extent_tree);
+			rb_erase(&curr->mmap_node, &node->mmap_extent_tree);
 			free(curr);
 			node->num_extents--;
 			break;
