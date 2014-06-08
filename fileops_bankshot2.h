@@ -18,6 +18,7 @@
 
 #include "nvp_mman.h"
 #include "nvp_lock.h"
+#include "rbtree.h"
 
 #define ENV_NV_FOP "NVP_NV_FOP"
 
@@ -63,6 +64,7 @@
 
 struct NVFile
 {
+	struct NVNode* node;
 	NVP_LOCK_DECL;
 	volatile bool valid;
 	int fd;
@@ -72,7 +74,6 @@ struct NVFile
 	bool append;
 	bool aligned;
 	ino_t serialno; // duplicated so that iterating doesn't require following every node*
-	struct NVNode* node;
 	bool posix;	// Use Posix operations
 //	int cache_fd;	// Cache file fd
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
@@ -80,6 +81,8 @@ struct NVFile
 
 struct NVNode
 {
+	struct rb_root extent_tree;
+	int num_extents;
 	ino_t serialno;
 	NVP_LOCK_DECL;
 	char* volatile data; // the pointer itself is volatile
@@ -90,17 +93,16 @@ struct NVNode
 	int cache_fd;	// Cache file fd
 	volatile size_t cache_length;
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
-	void *extent_tree;
-//	NVP_EXTENT_LOCK_DECL;
 };
 
 struct extent_cache_entry
 {
+	struct rb_node node;
 	off_t offset;
 	size_t count;
 	int dirty;
 	unsigned long mmap_addr;
-	struct extent_cache_entry *next;
+//	struct extent_cache_entry *next;
 };
 
 // declare and alias all the functions in ALLOPS
@@ -111,8 +113,7 @@ int _bankshot2_resize_map (struct NVFile* file, int newLength);
 int _bankshot2_resize_file(struct NVFile* file, int newLength);
 int _bankshot2_remap(struct NVFile* file, int newLength);
 
-
-void bankshot2_setup_extent_tree(struct NVNode *node);
+void bankshot2_print_extent_tree(struct NVNode *node);
 void bankshot2_cleanup_extent_tree(struct NVNode *node);
 int find_extent(struct NVFile *nvf, off_t *offset, size_t *count,
 			unsigned long *mmap_addr);

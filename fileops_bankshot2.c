@@ -524,8 +524,10 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	node->cache_serialno = data.cache_ino;
 	node->cache_length = data.cache_file_size;
 
-	if (!node->extent_tree)
-		bankshot2_setup_extent_tree(node);
+	if (node->num_extents == 0)
+		node->extent_tree = RB_ROOT;
+
+//	bankshot2_print_extent_tree(node);
 
 	nvf->cache_serialno = data.cache_ino;
 
@@ -733,6 +735,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
+			node->num_extents = 0;
 		}
 		
 		NVP_LOCK_WR(node->lock);
@@ -813,6 +816,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
+			node->num_extents = 0;
 		}
 		
 		NVP_LOCK_WR(node->lock);
@@ -1283,8 +1287,6 @@ void cache_write_back(struct NVFile *nvf)
 
 	MSG("%s: write back cache fd %d to fd %d\n", __func__,
 						nvf->fd, nvf->fd);
-
-//	RBTreePrint(nvf->node->extent_tree);
 
 	while (first_extent(nvf, &write_offset, &write_count, &dirty,
 			&mmap_addr) == 1)

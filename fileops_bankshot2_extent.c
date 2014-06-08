@@ -1,66 +1,65 @@
 #include "fileops_bankshot2.h"
-#include "red_black_tree.h"
 
-int extent_rbtree_compare(const void *left, const void *right)
+int extent_rbtree_compare(struct extent_cache_entry *curr,
+		struct extent_cache_entry *new)
 {
-	const struct extent_cache_entry *leftkey = left;
-	const struct extent_cache_entry *rightkey = right;
-
-	if (leftkey->offset < rightkey->offset) return -1;
-	if (leftkey->offset > rightkey->offset) return 1;
+	if (new->offset < curr->offset) return -1;
+	if (new->offset > curr->offset) return 1;
 
 	return 0;
 }
 
-int extent_rbtree_compare_find(const void *node, const off_t offset)
+int extent_rbtree_compare_find(struct extent_cache_entry *curr,
+		off_t offset)
 {
-	const struct extent_cache_entry *nodekey = node;
-
-	if ((nodekey->offset <= offset) &&
-			(nodekey->offset + nodekey->count > offset))
+	if ((curr->offset <= offset) &&
+			(curr->offset + curr->count > offset))
 		return 0;
 
-	if (nodekey->offset < offset) return -1;
-	if (nodekey->offset > offset) return 1;
+	if (offset < curr->offset) return -1;
+	if (offset > curr->offset) return 1;
 
 	return 0;
 }
 
-void extent_rbtree_destroykey(void *key)
+void extent_rbtree_printkey(struct extent_cache_entry *current)
 {
-	free(key);
-}
-
-void extent_rbtree_destroyinfo(void *key)
-{
-}
-
-void extent_rbtree_printkey(const void *key)
-{
-	const struct extent_cache_entry *current = key;
 	MSG("0x%.16llx to 0x%.16llx %d, mmap addr %lx\n", current->offset,
 		current->offset + current->count, current->dirty,
 		current->mmap_addr);
 }
 
-void extent_rbtree_printinfo(void *key)
+void bankshot2_print_extent_tree(struct NVNode *node)
 {
-}
+	struct extent_cache_entry *curr;
+	struct rb_node *temp;
 
-void bankshot2_setup_extent_tree(struct NVNode *node)
-{
-	node->extent_tree = RBTreeCreate(
-		extent_rbtree_compare,
-		extent_rbtree_destroykey,
-		extent_rbtree_destroyinfo,
-		extent_rbtree_printkey,
-		extent_rbtree_printinfo
-	);
+	temp = rb_first(&node->extent_tree);
+	MSG("Cache fd %d has %d extents\n", node->cache_fd, node->num_extents);
+	while (temp) {
+		curr = container_of(temp, struct extent_cache_entry, node);
+		extent_rbtree_printkey(curr);
+		temp = rb_next(temp);
+	}
+
+	return;
 }
 
 void bankshot2_cleanup_extent_tree(struct NVNode *node)
 {
-	RBTreeDestroy((rb_red_blk_tree *)(node->extent_tree));
+	struct extent_cache_entry *curr;
+	struct rb_node *temp;
+
+	temp = rb_first(&node->extent_tree);
+	while (temp) {
+		curr = container_of(temp, struct extent_cache_entry, node);
+		temp = rb_next(temp);
+		rb_erase(&curr->node, &node->extent_tree);
+		free(curr);
+	}
+
+	node->num_extents = 0;
+	return;
 }
 
 /* Find an extent in cache tree */
@@ -70,47 +69,31 @@ int find_extent(struct NVFile *nvf, off_t *offset, size_t *count,
 			unsigned long *mmap_addr)
 {
 	struct NVNode *node = nvf->node;
-	rb_red_blk_node *x;
-	rb_red_blk_node *nil;
-	rb_red_blk_tree *tree = node->extent_tree;
+	struct extent_cache_entry *curr;
+	struct rb_node *temp;
 	int compVal;
 
-	x = tree->root->left;
-	nil = tree->nil;
+	temp = node->extent_tree.rb_node;
 
-	if (x == nil)
-		return 0;
+	while (temp) {
+		curr = container_of(temp, struct extent_cache_entry, node);
+		compVal = extent_rbtree_compare_find(curr, *offset);
 
-	compVal = extent_rbtree_compare_find(x->key, *offset);
-	while (compVal) {
-		if (compVal == 1)
-			x = x->left;
-		else
-			x = x->right;
-
-		if (x == nil)
-			return 0;
-
-		compVal = extent_rbtree_compare_find(x->key, *offset);
+		if (compVal == -1)
+			temp = temp->rb_left;
+		else if (compVal == 1)
+			temp = temp->rb_right;
+		else 
+			goto found;
 	}
 
-	// found a matching node, return relevant values
-	struct extent_cache_entry *current = x->key;
+	return 0;
 
-	// Fully covered
-//	if (current->offset + current->count >= *offset + *count) {
-	*mmap_addr = current->mmap_addr;
-	*offset = current->offset;
-	*count = current->count;
+found:
+	*mmap_addr = curr->mmap_addr;
+	*offset = curr->offset;
+	*count = curr->count;
 	return 1;
-//	} else { // Partially covered
-//		*count -= current->offset + current->count - *offset;
-//		*offset = current->offset + current->count;
-//		*mmap_addr = current->mmap_addr;
-//		*offset = current->offset;
-//		*count = current->count;
-//		return 2;
-//	}
 }
 
 /* Add an extent to cache tree */
@@ -120,18 +103,15 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 			unsigned long mmap_addr)
 {
 	struct NVNode *node = nvf->node;
-	struct extent_cache_entry *new;
-	const struct extent_cache_entry *nodekey;
-	rb_red_blk_tree *tree = node->extent_tree;
-	rb_red_blk_node *newnode, *sucnode;
-	rb_red_blk_node *x;
-	rb_red_blk_node *nil;
+	struct extent_cache_entry *curr, *new, *next;
+	struct rb_node **temp, *parent, *next_node;
 	off_t extent_offset;
 	size_t extent_length;
 	unsigned long extent_mmap_addr;
 	int compVal;
+	int no_new = 0;
 
-	/* Break the extent to 2MB chunks */
+	/* Offset and length must be aligned to PAGE_SIZE */
 	if (offset != ALIGN_DOWN(offset) || length != ALIGN_DOWN(length)) {
 		ERROR("%s: offset or length not aligned to mmap unit size! "
 			"offset 0x%lx, length %lu\n", offset, length);
@@ -144,44 +124,44 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 	}
 
 	DEBUG("Add extent offset 0x%lx, length %lu\n", offset, length);
-	nil = tree->nil;
-
-	x = tree->root->left;
 
 	extent_offset = offset;
 	extent_length = length;
 	extent_mmap_addr = mmap_addr;
 
-	if (x == nil)
-		goto insert;
+	temp = &(node->extent_tree.rb_node);
+	parent = NULL;
 
-	compVal = extent_rbtree_compare_find(x->key, extent_offset);
-	while (compVal) {
-		if (compVal == 1)
-			x = x->left;
-		else
-			x = x->right;
+	while (*temp) {
+		curr = container_of(*temp, struct extent_cache_entry, node);
+		compVal = extent_rbtree_compare_find(curr, extent_offset);
 
-		if (x == nil)
-			goto insert;
+		parent = *temp;
 
-		compVal = extent_rbtree_compare_find(x->key,
-				extent_offset);
+		if (compVal == -1) {
+			temp = &((*temp)->rb_left);
+		} else if (compVal == 1) {
+			temp = &((*temp)->rb_right);
+		} else { 
+		/* Found existing extent */
+			if (extent_offset != curr->offset
+					|| extent_length != curr->count
+					|| extent_mmap_addr != curr->mmap_addr)
+				ERROR("%s: Found unmatch existing extent: "
+					"insert offset 0x%lx, length %lu, "
+					"mmap_addr 0x%lx, existing offset "
+					"0x%lx, length %lu, mmap_addr 0x%lx\n",
+					__func__, extent_offset, extent_length,
+					extent_mmap_addr, curr->offset,
+					curr->count, curr->mmap_addr);
+			no_new = 1;
+			break;
+		}
 	}
 
-		/* Found existing extent */
-	nodekey = (const struct extent_cache_entry *)(x->key);
-	if (extent_offset != nodekey->offset || extent_length != nodekey->count
-				|| extent_mmap_addr != nodekey->mmap_addr)
-		ERROR("%s: Found unmatch existing extent: "
-			"insert offset 0x%lx, length %lu, mmap_addr 0x%lx, "
-			"existing offset 0x%lx, length %lu, mmap_addr 0x%lx\n",
-			__func__, extent_offset, extent_length,
-			extent_mmap_addr, nodekey->offset, nodekey->count,
-			nodekey->mmap_addr);
-	return;
+	if (no_new)
+		return;
 
-insert:
 	new = malloc(sizeof(struct extent_cache_entry));
 	if (!new)
 		assert(0);
@@ -189,28 +169,29 @@ insert:
 	new->offset = extent_offset; 
 	new->count = extent_length;
 	new->dirty = write; 
-	new->next = NULL;
-	new->dirty = write;
 	new->mmap_addr = extent_mmap_addr;
 
-	newnode = RBTreeInsert(tree, new, NULL);
-	if (!newnode)
-		assert(0);
+	rb_link_node(&new->node, parent, temp);
+	rb_insert_color(&new->node, &node->extent_tree);
+	node->num_extents++;
 
-	sucnode = TreeSuccessor(tree, newnode);
-	if (sucnode != tree->nil) {
-		struct extent_cache_entry *next = sucnode->key;
-		if (new->offset + new->count > next->offset) {
-			ERROR("%s: insert extent overlaps "
-				"with existing extent: insert offset 0x%lx, "
-				"length %lu, mmap_addr 0x%lx, existing offset "
-				"0x%lx, length %lu, mmap_addr 0x%lx\n",
-				__func__, extent_offset, extent_length,
-				extent_mmap_addr, next->offset, next->count,
-				next->mmap_addr);
-			new->count = next->offset - new->offset;
-		}
+	next_node = rb_next(&new->node);
+	if (!next_node)
+		return;
+
+	next = container_of(next_node, struct extent_cache_entry, node);
+	if (new->offset + new->count > next->offset) {
+		ERROR("%s: insert extent overlaps "
+			"with existing extent: insert offset 0x%lx, "
+			"length %lu, mmap_addr 0x%lx, existing offset "
+			"0x%lx, length %lu, mmap_addr 0x%lx\n",
+			__func__, extent_offset, extent_length,
+			extent_mmap_addr, next->offset, next->count,
+			next->mmap_addr);
+		new->count = next->offset - new->offset;
 	}
+
+	return;
 #if 0
 	prenode = TreePredecessor(tree, newnode);
 	if (prenode != tree->nil) {
@@ -261,32 +242,27 @@ insert:
 void remove_extent(struct NVFile *nvf, off_t offset)
 {
 	struct NVNode *node = nvf->node;
+	struct extent_cache_entry *curr;
+	struct rb_node *temp;
 	int compVal;
-	rb_red_blk_tree *tree = node->extent_tree;
-	rb_red_blk_node *x;
-	rb_red_blk_node *nil;
 
-	x = tree->root->left;
-	nil = tree->nil;
+	temp = node->extent_tree.rb_node;
+	while (temp) {
+		curr = container_of(temp, struct extent_cache_entry, node);
+		compVal = extent_rbtree_compare_find(curr, offset);
 
-	if (x == nil)
-		return;
-
-	compVal = extent_rbtree_compare_find(x->key, offset);
-	while (compVal) {
-		if (compVal == 1)
-			x = x->left;
-		else
-			x = x->right;
-
-		if (x == nil)
-			return;
-
-		compVal = extent_rbtree_compare_find(x->key, offset);
+		if (compVal == -1) {
+			temp = temp->rb_left;
+		} else if (compVal == 1) {
+			temp = temp->rb_right;
+		} else {
+			rb_erase(&curr->node, &node->extent_tree);
+			free(curr);
+			node->num_extents--;
+			break;
+		}
 	}
 
-	DEBUG("Remove extent offset 0x%lx\n", offset);
-	RBDelete(tree, x);
 	return;
 }
 
@@ -296,27 +272,20 @@ int first_extent(struct NVFile *nvf, off_t *offset, size_t *count, int *dirty,
 				unsigned long *mmap_addr)
 {
 	struct NVNode *node = nvf->node;
-	rb_red_blk_node *x;
-	rb_red_blk_node *nil;
-	rb_red_blk_tree *tree = node->extent_tree;
+	struct extent_cache_entry *curr;
+	struct rb_node *temp;
 //	int compVal;
 
-	x = tree->root->left;
-	nil = tree->nil;
-
-	if (x == nil)
+	temp = rb_first(&node->extent_tree);
+	if (!temp)
 		return 0;
 
-	while (x->left != nil)
-		x = x->left;
+	curr = container_of(temp, struct extent_cache_entry, node);
 
-	// found a matching node, return relevant values
-	struct extent_cache_entry *current = x->key;
-
-	*count = current->count;
-	*offset = current->offset;
-	*dirty = current->dirty;
-	*mmap_addr = current->mmap_addr;
+	*count = curr->count;
+	*offset = curr->offset;
+	*dirty = curr->dirty;
+	*mmap_addr = curr->mmap_addr;
 
 	return 1;
 }

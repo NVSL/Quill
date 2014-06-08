@@ -29,6 +29,11 @@
 #ifndef	_LINUX_RBTREE_H
 #define	_LINUX_RBTREE_H
 
+#define offsetof1(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
+
+#define container_of(ptr, type, member) ({                      \
+        const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
+        (type *)( (char *)__mptr - offsetof1(type,member) );})
 
 struct rb_node {
 	unsigned long  __rb_parent_color;
