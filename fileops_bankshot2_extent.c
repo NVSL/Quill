@@ -37,9 +37,9 @@ int mmap_rbtree_compare_find(struct extent_cache_entry *curr,
 
 void extent_rbtree_printkey(struct extent_cache_entry *current)
 {
-	MSG("0x%.16llx to 0x%.16llx %d, mmap addr %lx\n", current->offset,
-		current->offset + current->count, current->dirty,
-		current->mmap_addr);
+	MSG("0x%.16llx to 0x%.16llx %d, mmap addr %lx, length %llu\n",
+		current->offset, current->offset + current->count,
+		current->dirty,	current->mmap_addr, current->count);
 }
 
 void bankshot2_print_extent_tree(struct NVNode *node)
@@ -51,6 +51,14 @@ void bankshot2_print_extent_tree(struct NVNode *node)
 	MSG("Cache fd %d has %d extents\n", node->cache_fd, node->num_extents);
 	while (temp) {
 		curr = container_of(temp, struct extent_cache_entry, node);
+		extent_rbtree_printkey(curr);
+		temp = rb_next(temp);
+	}
+
+	MSG("Mmap tree:\n");
+	temp = rb_first(&node->mmap_extent_tree);
+	while (temp) {
+		curr = container_of(temp, struct extent_cache_entry, mmap_node);
 		extent_rbtree_printkey(curr);
 		temp = rb_next(temp);
 	}
@@ -264,6 +272,7 @@ mmap_tree:
 				extent_mmap_addr, curr->offset,
 				curr->count, curr->mmap_addr);
 //			assert(0);
+			bankshot2_print_extent_tree(node);
 		}
 	}
 
@@ -271,6 +280,30 @@ mmap_tree:
 	rb_insert_color(&new->mmap_node, &node->mmap_extent_tree);
 
 	node->num_extents++;
+
+	/* The new inserted extent may overlap with next extent */
+	next_node = rb_next(&new->mmap_node);
+	while (next_node) {
+		next = container_of(next_node, struct extent_cache_entry,
+					mmap_node);
+		if (new->mmap_addr + new->count > next->mmap_addr) {
+			DEBUG("%s: insert extent mmapp region overlaps "
+				"with existing extent: insert offset 0x%lx, "
+				"length %lu, mmap_addr 0x%lx, existing offset "
+				"0x%lx, length %lu, mmap_addr 0x%lx\n",
+				__func__, extent_offset, extent_length,
+				extent_mmap_addr, next->offset, next->count,
+				next->mmap_addr);
+			rb_erase(&next->node, &node->extent_tree);
+			rb_erase(&next->mmap_node, &node->mmap_extent_tree);
+			free(next);
+			node->num_extents--;
+			next_node = rb_next(&new->mmap_node);
+		} else {
+			break;
+		}
+	}
+
 	return;
 
 #if 0
