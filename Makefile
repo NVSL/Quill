@@ -35,7 +35,7 @@ libfileops_sem.so: fileops_sem.o $(COMMON_OBJ)
 libfileops_nvp.so: fileops_nvp.o $(COMMON_OBJ)
 	$(CC) $(CFLAGS) -shared -Wl,-soname,$@ -o $@ $< $(COMMON_OBJ) -ldl -funroll-loops
 
-BANKSHOT2_OBJ=nvp_printf.o fileops_bankshot2_extent.o red_black_tree.o rbtree.o
+BANKSHOT2_OBJ=nvp_printf.o fileops_bankshot2_extent.o rbtree.o
 libfileops_bankshot2.so: fileops_bankshot2.o $(BANKSHOT2_OBJ) 
 	$(CC) $(CFLAGS) -shared -Wl,-soname,$@ -o $@ $< $(BANKSHOT2_OBJ) -ldl -funroll-loops
 
