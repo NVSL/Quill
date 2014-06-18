@@ -1323,6 +1323,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	size_t cached_extent_length;
 	struct bankshot2_cache_data data;
 	size_t request_len = *file_length;
+	struct timespec start, end;
 	
 	unsigned long cached_extent_start;
 
@@ -1362,7 +1363,11 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 			read_count = len_to_read - covered_size;
 		}
 #endif
+
+//	clock_gettime(CLOCK_MONOTONIC, &start);
 	ret = copy_to_cache(nvf, &data);
+//	clock_gettime(CLOCK_MONOTONIC, &end);
+//	printf("copy to cache time: %lu\n", end.tv_nsec - start.tv_nsec);
 	DEBUG("copy_to_cache return %d, offset %llu, start %llu, length %llu\n",
 		ret, data.extent_start_file_offset, data.extent_start,
 		data.extent_length);
@@ -1370,6 +1375,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	if (ret == 0) {
 		if (data.mmap_length) {
 			// Acquire node write lock for add_extent
+//			clock_gettime(CLOCK_MONOTONIC, &start);
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_RD(nvf, cpuid);
 				NVP_LOCK_NODE_WR(nvf);
@@ -1383,6 +1389,8 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				NVP_UNLOCK_NODE_WR(nvf);
 				NVP_LOCK_NODE_RD(nvf, cpuid);
 			}
+//			clock_gettime(CLOCK_MONOTONIC, &end);
+//			printf("Add extent time: %lu\n", end.tv_nsec - start.tv_nsec);
 		}
 		bankshot2_update_file_length(nvf, data.file_length);
 		ret = 5;
@@ -1440,6 +1448,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 	size_t read_count, extent_length;
 	size_t file_length;
 	unsigned long mmap_addr = 0;
+	struct timespec start, end;
 
 	ssize_t available_length = (nvf->node->length) - offset;
 
@@ -1530,8 +1539,11 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 	while(len_to_read > 0) {
 		DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, len_to_read);
 		file_length = len_to_read;
+//		clock_gettime(CLOCK_MONOTONIC, &start);
 		ret = bankshot2_get_extent(nvf, read_offset, &extent_length, &mmap_addr,
 						&file_length, READ_EXTENT, buf, 0, cpuid);
+//		clock_gettime(CLOCK_MONOTONIC, &end);
+//		printf("get extent time: %lu\n", end.tv_nsec - start.tv_nsec);
 		DEBUG("Pread: get_extent returned %d\n", ret);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
@@ -1588,7 +1600,10 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 			void* result =
 #endif
 //				memcpy(buf, (char *)mmap_addr, extent_length);
+//				clock_gettime(CLOCK_MONOTONIC, &start);
 				memcpy1(buf, (char *)mmap_addr, extent_length);
+//				clock_gettime(CLOCK_MONOTONIC, &end);
+//				printf("memcpy time: %lu\n", end.tv_nsec - start.tv_nsec);
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
