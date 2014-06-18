@@ -111,7 +111,7 @@ static inline int _nvp_get_cpuid(void)
 
 #define NVP_NUM_LOCKS 32
 
-#define WR_HELD	(1 << 31)
+#define WR_HELD	(1 << 30)
 
 #define NVP_LOCK_DECL uint32_t lock[NVP_NUM_LOCKS * 16]
 

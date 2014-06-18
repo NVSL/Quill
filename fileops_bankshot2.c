@@ -1323,7 +1323,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	size_t cached_extent_length;
 	struct bankshot2_cache_data data;
 	size_t request_len = *file_length;
-	struct timespec start, end;
+//	struct timespec start, end;
 	
 	unsigned long cached_extent_start;
 
@@ -1448,7 +1448,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 	size_t read_count, extent_length;
 	size_t file_length;
 	unsigned long mmap_addr = 0;
-	struct timespec start, end;
+//	struct timespec start, end;
 
 	ssize_t available_length = (nvf->node->length) - offset;
 
