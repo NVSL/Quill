@@ -532,6 +532,7 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 //	bankshot2_print_extent_tree(node);
 
 	nvf->cache_serialno = data.cache_ino;
+	DEBUG("Assign cache ino %d\n", nvf->cache_serialno);
 
 /*
 	nvf->node->maxPerms |= (nvf->canRead)?PROT_READ:0;
@@ -606,6 +607,7 @@ void bankshot2_clear_mappings(void)
 		nvf = &_bankshot2_fd_lookup[i];
 		cache_ino = nvf->cache_serialno;
 		if (cache_ino) {
+			DEBUG("Clear cache fd %d mappings\n", cache_ino);
 			_bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
 				BANKSHOT2_IOCTL_REMOVE_MAPPING, &cache_ino);
 		}
@@ -930,7 +932,15 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	}
 #endif
 
-	if (_bankshot2_get_cache_inode(path, oflag, mode, nvf) < 0) {
+	/* This is a nasty workaround for FIO */
+	if (path[0] == '/' && path[1] == 's'
+			&& path[2] == 'y' && path[3] == 's') {
+		nvf->posix = 1;
+		MSG("A Posix Path: %s\n", path);
+	}
+
+	if ((nvf->posix == 0) && (_bankshot2_get_cache_inode(path, oflag,
+						mode, nvf) < 0)) {
 		ERROR("Get Cache Inode for %s failed!\n", path);
 		assert(0);
 	}
@@ -981,6 +991,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 
 	if (nvf->posix) {
 		nvf->valid = 0;
+		nvf->posix = 0;
 		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
 		return _bankshot2_fileops->CLOSE(CALL_CLOSE);
 	}
@@ -992,6 +1003,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 
 //	cache_write_back(nvf);
 	nvf->valid = 0;
+	DEBUG("fd %d, cache ino %d\n", nvf->fd, nvf->cache_serialno);
 
 	//_bankshot2_test_invalidate_node(nvf);
 
