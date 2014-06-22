@@ -41,7 +41,7 @@ static inline int _nvp_get_cpuid(void)
 // reduce contention we space them out across cache lines.
 #if	USE_PTHREAD_LOCK
 
-#define NVP_NUM_LOCKS 32
+#define NVP_NUM_LOCKS	16
 
 #define NVP_LOCK_DECL pthread_rwlock_t lock[NVP_NUM_LOCKS]
 
@@ -109,7 +109,7 @@ static inline int _nvp_get_cpuid(void)
 
 #else
 
-#define NVP_NUM_LOCKS 32
+#define NVP_NUM_LOCKS	16
 
 #define WR_HELD	(1 << 30)
 
