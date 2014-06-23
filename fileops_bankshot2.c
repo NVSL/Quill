@@ -70,8 +70,8 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like P
 RETT_PWRITE _bankshot2_do_pread (INTF_PREAD, int cpuid); // like PREAD , but without locks (called by _bankshot2_READ )
 RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_write
 
-#define DO_MSYNC(nvf) do{ \
-	DEBUG("NOT doing a msync\n"); }while(0)
+#define DO_MSYNC(nvf) do{}while(0)
+//	DEBUG("NOT doing a msync\n"); }while(0)
 /*
 	DEBUG("Doing a msync on fd %i (node %p)\n", nvf->fd, nvf->node); \
 	if(msync(nvf->node->data, nvf->node->maplength, MS_SYNC|MS_INVALIDATE)) { \
@@ -628,7 +628,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		return -1;
 	}
 	
-	DEBUG("_bankshot2_OPEN(%s)\n", path);
+	DEBUG("\n\n_bankshot2_OPEN(%s)\n", path);
 
 	if (!bankshot2_ctrl_fd) {
 		bankshot2_ctrl_fd = _bankshot2_fileops->OPEN(bankshot2_ctrl_dev,
@@ -1017,6 +1017,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 
 	NVP_UNLOCK_NODE_WR(nvf);
 	NVP_UNLOCK_FD_WR(nvf);
+	DEBUG("_bankshot2_CLOSE(%i) finished\n\n", file);
 
 	return result;
 }
@@ -1363,6 +1364,12 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	data.rnw = rnw;
 	data.read = (data.rnw == READ_EXTENT);
 	data.write = (data.rnw == WRITE_EXTENT);
+
+	DEBUG("Send ioctl request to kernel: fd %d, cache fd %llu, "
+		"offset %llu, size %llu, length %llu\n",
+		data.file, data.cache_ino, data.offset, data.size,
+		data.file_length);
+
 //	data.map_length = request_len > MAP_UNIT ? request_len : MAP_UNIT;
 
 # if 0
@@ -1431,6 +1438,10 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 //	*mmap_addr = data.mmap_addr + (offset - data.mmap_offset);
 	*extent_length = data.actual_length - (offset - data.actual_offset);
 	/* Check if the actual transferred extent covers the required extent */
+	DEBUG("Transferred extent: require offset %llu, actual_offset %llu, "
+		"actual_length %llu, extent length %llu\n",
+		offset, data.actual_offset, data.actual_length,
+		*extent_length);
 	if ((data.actual_offset > offset) || (data.actual_length +
 			data.actual_offset) <= offset) {
 		ERROR("Transferred extent does not cover request extent:\n"
@@ -1556,7 +1567,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 						&file_length, READ_EXTENT, buf, 0, cpuid);
 //		clock_gettime(CLOCK_MONOTONIC, &end);
 //		printf("get extent time: %lu\n", end.tv_nsec - start.tv_nsec);
-		DEBUG("Pread: get_extent returned %d\n", ret);
+		DEBUG("Pread: get_extent returned %d, length %llu\n", ret, extent_length);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
 			break;
@@ -1653,6 +1664,7 @@ update_length:
 
 	DO_MSYNC(nvf);
 
+	DEBUG("Return read_count %lu\n", read_count);
 	return read_count;
 }
 
@@ -1852,7 +1864,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		file_length = len_to_write;
 		ret = bankshot2_get_extent(nvf, write_offset, &extent_length, &mmap_addr,
 						&file_length, WRITE_EXTENT, new_buf, wr_lock, cpuid);
-		DEBUG("Pwrite: get_extent returned %d\n", ret);
+		DEBUG("Pwrite: get_extent returned %d, length %llu\n", ret, extent_length);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
 //			if ((write_offset % 2097152) == 0)
