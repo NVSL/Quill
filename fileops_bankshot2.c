@@ -1105,8 +1105,25 @@ static ssize_t _bankshot2_check_write_size_valid(size_t count)
 	return count;
 }
 
+void integrity_check(const char *buf, char *buf1, size_t length)
+{
+	int i = 0;
+	while (i < length) {
+		if (buf[i] != buf1[i]) {
+			MSG("ERROR: %d %lu: %c %c\n", i, length, buf1[i], buf[i]);
+			return;
+		}
+		i++;
+	}
+//	MSG("Correct: %d %lu\n", i, length);
+}
+
 RETT_READ _bankshot2_READ(INTF_READ)
 {
+	char * buf1;
+	buf1 = malloc(length);
+	memset(buf1, '0', length);
+
 	DEBUG("_bankshot2_READ %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
@@ -1145,6 +1162,11 @@ RETT_READ _bankshot2_READ(INTF_READ)
 	}
 
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
+
+	_bankshot2_fileops->READ(file, buf1, length);
+	integrity_check(buf, buf1, length);
+	MSG("offset: %lu\n", *nvf->offset);
+	free(buf1);
 
 	return result;
 }
@@ -1519,6 +1541,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 	size_t read_count, extent_length;
 	size_t file_length;
 	unsigned long mmap_addr = 0;
+	
 //	struct timespec start, end;
 
 	ssize_t available_length = (nvf->node->length) - offset;
@@ -1567,20 +1590,6 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 		}
 	}
 
-#if 0
-	int intersects = 0;
-
-	if(UNLIKELY( buf == (void*)nvf->node->data )) { intersects = 1; }
-	if(UNLIKELY( (buf > (void*)nvf->node->data) && (buf <= (void*)nvf->node->data + nvf->node->maplength) )) { intersects = 1; }
-	if(UNLIKELY( (buf < (void*)nvf->node->data) && (buf+count >= (void*)nvf->node->data) )) { intersects = 1; }
-
-	if(UNLIKELY(intersects))
-	{
-		DEBUG("Buffer intersects with map (buffer %p map %p)\n", buf, nvf->node->data);
-		assert(0);
-		return -1;
-	}
-#endif
 	ssize_t len_to_read = count;
 
 	DEBUG("time for a Pread.  file length %li, offset %li, length-offset %li, count %li, count>offset %s\n", nvf->node->length, offset, available_length, count, (count>available_length)?"true":"false");
@@ -1596,12 +1605,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 		return 0; // reading 0 bytes is easy!
 	}
 
-	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p, %p (%p+%li), %li (call was %li))\n", buf, nvf->node->data+offset, nvf->node->data, offset, len_to_read, count);
-
-//	DEBUG("mmap is length %li, len_to_read is %li\n", nvf->node->maplength, len_to_read);
-
 	SANITYCHECK(len_to_read + offset <= nvf->node->length);
-//	SANITYCHECK(nvf->node->length < nvf->node->maplength);
 
 	/* If request extent not in cache, we need to read it from backing store and copy to cache */
 	read_count = 0;
@@ -2053,6 +2057,9 @@ RETT_SEEK64 _bankshot2_SEEK64(INTF_SEEK64)
 		DEBUG("Call posix SEEK64 for fd %d\n", nvf->fd);
 		return _bankshot2_fileops->SEEK64(CALL_SEEK64);
 	}
+
+	/* lseek() needs to populated to file system */
+	_bankshot2_fileops->SEEK64(CALL_SEEK64);
 
 	/* Use atomic operation to update offset */
 //	int cpuid = GET_CPUID();
