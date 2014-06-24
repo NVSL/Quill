@@ -656,6 +656,7 @@ struct NVNode * bankshot2_allocate_node(void)
 	{
 		if(_bankshot2_node_lookup[i].serialno == 0) {
 			node = &_bankshot2_node_lookup[i];
+			DEBUG("Allocating unused NVNode %d\n", i);
 			bankshot2_cleanup_extent_tree(node);
 			break;
 		}
@@ -669,6 +670,7 @@ struct NVNode * bankshot2_allocate_node(void)
 	{
 		if(_bankshot2_node_lookup[i].reference == 0) {
 			node = &_bankshot2_node_lookup[i];
+			DEBUG("Allocating unreferenced NVNode %d\n", i);
 			bankshot2_cleanup_extent_tree(node);
 			break;
 		}
