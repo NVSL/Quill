@@ -56,7 +56,10 @@ int MMAP_PAGE_SIZE;
 
 void* _bankshot2_zbuf; // holds all zeroes.  used for aligned file extending. TODO: does sharing this hurt performance?
 
+pthread_spinlock_t node_lookup_lock;
+
 struct NVFile* _bankshot2_fd_lookup;
+struct NVNode* _bankshot2_node_lookup;
 
 void _bankshot2_init2(void);
 int _bankshot2_extend_map(struct NVFile *nvf, size_t newlen);
@@ -399,13 +402,25 @@ void _bankshot2_init2(void)
 
 	assert(!posix_memalign(((void**)&_bankshot2_zbuf), 4096, 4096));
 
-	_bankshot2_fd_lookup = (struct NVFile*) calloc(OPEN_MAX, sizeof(struct NVFile));
+	_bankshot2_fd_lookup = (struct NVFile *)
+				calloc(OPEN_MAX, sizeof(struct NVFile));
 
 	int i;
-	for(i=0; i<OPEN_MAX; i++) {
+	for(i = 0; i < OPEN_MAX; i++) {
 		_bankshot2_fd_lookup[i].valid = 0;
 		NVP_LOCK_INIT(_bankshot2_fd_lookup[i].lock);
 	}
+
+	_bankshot2_node_lookup = (struct NVNode *)
+				calloc(OPEN_MAX, sizeof(struct NVNode));
+
+	for(i = 0; i < OPEN_MAX; i++) {
+		_bankshot2_node_lookup[i].reference = 0;
+		_bankshot2_node_lookup[i].num_extents = 0;
+		NVP_LOCK_INIT(_bankshot2_node_lookup[i].lock);
+	}
+
+	pthread_spin_init(&node_lookup_lock, PTHREAD_PROCESS_SHARED);
 
 	MMAP_PAGE_SIZE = getpagesize();
 	SANITYCHECK(MMAP_PAGE_SIZE > 100);
@@ -600,6 +615,7 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 void bankshot2_clear_mappings(void)
 {
 	struct NVFile *nvf;
+	struct NVNode *node;
 	int i;
 	uint64_t cache_ino;
 
@@ -614,6 +630,82 @@ void bankshot2_clear_mappings(void)
 	}
 
 	_bankshot2_fileops->CLOSE(bankshot2_ctrl_fd);
+
+	free(_bankshot2_fd_lookup);
+
+	pthread_spin_lock(&node_lookup_lock);
+
+	for (i = 0; i < OPEN_MAX; i++) {
+		node = &_bankshot2_node_lookup[i];
+		bankshot2_cleanup_extent_tree(node);
+	}
+
+	pthread_spin_unlock(&node_lookup_lock);
+	pthread_spin_destroy(&node_lookup_lock);
+
+	free(_bankshot2_node_lookup);
+}
+
+struct NVNode * bankshot2_allocate_node(void)
+{
+	struct NVNode *node = NULL;
+	int i;
+
+	// Find a NVNode without backing file inode
+	for (i = 0; i < OPEN_MAX; i++)
+	{
+		if(_bankshot2_node_lookup[i].serialno == 0) {
+			node = &_bankshot2_node_lookup[i];
+			bankshot2_cleanup_extent_tree(node);
+			break;
+		}
+	}
+
+	if (node)
+		return node;
+
+	// Find a NVNode without references
+	for (i = 0; i < OPEN_MAX; i++)
+	{
+		if(_bankshot2_node_lookup[i].reference == 0) {
+			node = &_bankshot2_node_lookup[i];
+			bankshot2_cleanup_extent_tree(node);
+			break;
+		}
+	}
+
+	return node;
+}
+
+struct NVNode * bankshot2_get_node(const char *path, struct stat *file_st)
+{
+	struct NVNode *node = NULL;
+	int i;
+
+	pthread_spin_lock(&node_lookup_lock);
+	for (i = 0; i < OPEN_MAX; i++)
+	{
+		if(_bankshot2_node_lookup[i].serialno == file_st->st_ino) {
+			DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
+			node = &_bankshot2_node_lookup[i];
+			break;
+		}
+	}
+
+	if(!node) {
+		DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
+		node = bankshot2_allocate_node();
+		assert(node);
+		node->length = file_st->st_size;
+		node->maplength = 0;
+		node->serialno = file_st->st_ino;
+		node->num_extents = 0;
+	}
+
+	node->reference++;
+
+	pthread_spin_unlock(&node_lookup_lock);
+	return node;
 }
 
 RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
@@ -717,31 +809,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		DEBUG("File exists before we open it.  Let's get the lock first.\n");
 
 		// Find or allocate a NVNode
-		int i;
-		for(i=0; i<OPEN_MAX; i++)
-		{
-			if( _bankshot2_fd_lookup[i].node && _bankshot2_fd_lookup[i].node->serialno == file_st.st_ino) {
-				DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
-				node = _bankshot2_fd_lookup[i].node;
-				SANITYCHECK(node != NULL);
-				// when sharing nodes it's good to msync in case of multithreading // TODO is this true?
-				if(msync(node->data, node->maplength, MS_SYNC|MS_INVALIDATE)) {
-					ERROR("Failed to msync for path %s\n", path);
-					assert(0);
-				}
-				break;
-			}
-		}
-		if(node==NULL) {
-			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
-			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
-			NVP_LOCK_INIT(node->lock);
-			node->length = file_st.st_size;
-			node->maplength = 0;
-			node->serialno = file_st.st_ino;
-			node->num_extents = 0;
-		}
-		
+		node = bankshot2_get_node(path, &file_st);
 		NVP_LOCK_WR(node->lock);
 	}
 
@@ -798,31 +866,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		DEBUG("We created the file.  Let's check and make sure someone else hasn't already created the node.\n");
 
 		// Find or allocate a NVNode
-		int i;
-		for(i=0; i<OPEN_MAX; i++)
-		{
-			if( _bankshot2_fd_lookup[i].node && _bankshot2_fd_lookup[i].node->serialno == file_st.st_ino) {
-				DEBUG("File %s is (or was) already open in fd %i (this fd is fd %i)!  Sharing nodes.\n", path, i, result);
-				node = _bankshot2_fd_lookup[i].node;
-				SANITYCHECK(node != NULL);
-				// when sharing nodes it's good to msync in case of multithreading // TODO is this true?
-				if(msync(node->data, node->maplength, MS_SYNC|MS_INVALIDATE)) {
-					ERROR("Failed to msync for fd %i\n", result);
-					assert(0);
-				}
-				break;
-			}
-		}
-		if(node==NULL) {
-			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
-			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
-			NVP_LOCK_INIT(node->lock);
-			node->length = file_st.st_size;
-			node->maplength = 0;
-			node->serialno = file_st.st_ino;
-			node->num_extents = 0;
-		}
-		
+		node = bankshot2_get_node(path, &file_st);
 		NVP_LOCK_WR(node->lock);
 	}
 	if(FLAGS_INCLUDE(oflag, O_TRUNC))
@@ -992,6 +1036,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 	if (nvf->posix) {
 		nvf->valid = 0;
 		nvf->posix = 0;
+		nvf->node->reference--;
 		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
 		return _bankshot2_fileops->CLOSE(CALL_CLOSE);
 	}
@@ -1003,6 +1048,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 
 //	cache_write_back(nvf);
 	nvf->valid = 0;
+	nvf->node->reference--;
 	DEBUG("fd %d, cache ino %d\n", nvf->fd, nvf->cache_serialno);
 
 	//_bankshot2_test_invalidate_node(nvf);
@@ -2770,7 +2816,7 @@ void _bankshot2_test_invalidate_node(struct NVFile* nvf)
 		
 //		pthread_rwlock_destroy(&node->lock);
 
-		free(node);
+//		free(node);
 
 		nvf->node = NULL; // we don't want anyone using this again
 		

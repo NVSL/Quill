@@ -48,7 +48,7 @@ void bankshot2_print_extent_tree(struct NVNode *node)
 	struct rb_node *temp;
 
 	temp = rb_first(&node->extent_tree);
-	MSG("Cache fd %d has %d extents\n", node->cache_fd, node->num_extents);
+	MSG("Cache fd %d has %d extents\n", node->cache_serialno, node->num_extents);
 	while (temp) {
 		curr = container_of(temp, struct extent_cache_entry, node);
 		extent_rbtree_printkey(curr);
