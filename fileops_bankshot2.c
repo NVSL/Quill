@@ -1115,7 +1115,7 @@ void integrity_check(const char *buf, char *buf1, size_t length)
 		}
 		i++;
 	}
-//	MSG("Correct: %d %lu\n", i, length);
+	DEBUG("Correct: %d %lu\n", i, length);
 }
 
 RETT_READ _bankshot2_READ(INTF_READ)
@@ -1165,7 +1165,7 @@ RETT_READ _bankshot2_READ(INTF_READ)
 
 	_bankshot2_fileops->READ(file, buf1, length);
 	integrity_check(buf, buf1, length);
-	MSG("offset: %lu\n", *nvf->offset);
+	DEBUG("offset: %lu\n", *nvf->offset);
 	free(buf1);
 
 	return result;
@@ -1229,6 +1229,10 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 
 RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 {
+	char * buf1;
+	buf1 = malloc(count);
+	memset(buf1, '0', count);
+
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
 	DEBUG("_bankshot2_PREAD %d\n", file);
@@ -1254,6 +1258,11 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
+
+	_bankshot2_fileops->PREAD(file, buf1, count, offset);
+	integrity_check(buf, buf1, count);
+	DEBUG("offset: %lu\n", *nvf->offset);
+	free(buf1);
 
 	return result;
 }
