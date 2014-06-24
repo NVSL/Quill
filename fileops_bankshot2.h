@@ -75,7 +75,6 @@ struct NVFile
 	bool aligned;
 	ino_t serialno; // duplicated so that iterating doesn't require following every node*
 	bool posix;	// Use Posix operations
-//	int cache_fd;	// Cache file fd
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
 };
 
@@ -91,7 +90,6 @@ struct NVNode
 	volatile size_t maplength;
 //	volatile int maxPerms;
 //	volatile int valid; // for debugging purposes
-	int cache_fd;	// Cache file fd
 	volatile size_t cache_length;
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
 };
