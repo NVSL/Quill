@@ -1127,10 +1127,10 @@ int integrity_check(const char *buf, char *buf1, size_t length)
 	}
 
 	if (count)
-		MSG("ERROR: %d errors in length %lu, from %d to %d\n",
+		DEBUG("ERROR: %d errors in length %lu, from %d to %d\n",
 			count, length, start, end);
 	else
-		MSG("Correct: %d %lu\n", i, length);
+		DEBUG("Correct: %d %lu\n", i, length);
 
 	return count;
 }
@@ -1168,7 +1168,7 @@ void integrity_test_extent(struct NVFile *nvf, uint64_t mmap_offset,
 		MSG("Extent ERROR: %d errors in length %lu, from %d to %d\n",
 			count, length, start, end);
 	else
-		MSG("Extent Correct: offset 0x%llx(%llu), %d %lu\n",
+		DEBUG("Extent Correct: offset 0x%llx(%llu), %d %lu\n",
 			mmap_offset, mmap_offset, i, length);
 }
 
