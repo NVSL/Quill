@@ -1286,7 +1286,7 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 #if INTEGRITY_CHECK
-	_bankshot2_fileops->WRITE(INTF_WRITE);
+	_bankshot2_fileops->WRITE(CALL_WRITE);
 #endif
 
 	return result;
@@ -1380,7 +1380,7 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 #if INTEGRITY_CHECK
-	_bankshot2_fileops->PWRITE(INTF_PWRITE);
+	_bankshot2_fileops->PWRITE(CALL_PWRITE);
 #endif
 
 	return result;
