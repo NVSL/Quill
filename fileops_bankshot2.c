@@ -688,19 +688,23 @@ struct NVNode * bankshot2_get_node(const char *path, struct stat *file_st)
 	for (i = 0; i < OPEN_MAX; i++)
 	{
 		if(_bankshot2_node_lookup[i].serialno == file_st->st_ino) {
-			DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
+			DEBUG("File %s is (or was) already open in fd %i "
+				"(this fd hasn't been __open'ed yet)! "
+				"Sharing nodes.\n", path, i);
 			node = &_bankshot2_node_lookup[i];
 			break;
 		}
 	}
 
 	if(!node) {
-		DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
+		DEBUG("File %s is not already open.  Allocating new NVNode.\n",
+			path);
 		node = bankshot2_allocate_node();
 		assert(node);
 		node->length = file_st->st_size;
 		node->maplength = 0;
 		node->serialno = file_st->st_ino;
+		DEBUG("File %s st_ino %llu\n", path, node->serialno);
 		node->num_extents = 0;
 	}
 
@@ -716,13 +720,13 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	if(path==NULL) {
+	if (path == NULL) {
 		DEBUG("Invalid path.\n");
 		errno = EINVAL;
 		return -1;
 	}
 	
-	DEBUG("\n\n_bankshot2_OPEN(%s)\n", path);
+	DEBUG("\n_bankshot2_OPEN(%s)\n", path);
 
 	if (!bankshot2_ctrl_fd) {
 		bankshot2_ctrl_fd = _bankshot2_fileops->OPEN(bankshot2_ctrl_dev,
@@ -1105,17 +1109,67 @@ static ssize_t _bankshot2_check_write_size_valid(size_t count)
 	return count;
 }
 
-void integrity_check(const char *buf, char *buf1, size_t length)
+int integrity_check(const char *buf, char *buf1, size_t length)
 {
 	int i = 0;
+	int count = 0;
+	int start = -1;
+	int end = 0;
+
 	while (i < length) {
 		if (buf[i] != buf1[i]) {
-			MSG("ERROR: %d %lu: %c %c\n", i, length, buf1[i], buf[i]);
-			return;
+			count++;
+			if (start == -1)
+				start = i;
+			end = i;
 		}
 		i++;
 	}
-	DEBUG("Correct: %d %lu\n", i, length);
+
+	if (count)
+		MSG("ERROR: %d errors in length %lu, from %d to %d\n",
+			count, length, start, end);
+	else
+		DEBUG("Correct: %d %lu\n", i, length);
+
+	return count;
+}
+
+void integrity_test_extent(struct NVFile *nvf, uint64_t mmap_offset,
+		size_t length, unsigned long mmap_addr)
+{
+	int i = 0;
+	int count = 0;
+	int start = -1;
+	int end = 0;
+	char * buf1, *buf;
+
+	buf = malloc(length);
+	memset(buf, '0', length);
+
+	buf1 = malloc(length);
+	memset(buf1, '0', length);
+
+	_bankshot2_fileops->PREAD(nvf->fd, buf, length, mmap_offset);
+
+	memcpy(buf1, (char *)mmap_addr, length);
+
+	while (i < length) {
+		if (buf[i] != buf1[i]) {
+			count++;
+			if (start == -1)
+				start = i;
+			end = i;
+		}
+		i++;
+	}
+
+	if (count)
+		MSG("Extent ERROR: %d errors in length %lu, from %d to %d\n",
+			count, length, start, end);
+	else
+		MSG("Extent Correct: offset 0x%llx(%llu), %d %lu\n",
+			mmap_offset, mmap_offset, i, length);
 }
 
 RETT_READ _bankshot2_READ(INTF_READ)
@@ -1123,6 +1177,7 @@ RETT_READ _bankshot2_READ(INTF_READ)
 	char * buf1;
 	buf1 = malloc(length);
 	memset(buf1, '0', length);
+	int error;
 
 	DEBUG("_bankshot2_READ %d\n", file);
 
@@ -1148,7 +1203,7 @@ RETT_READ _bankshot2_READ(INTF_READ)
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	
-	if(result == length)	{
+	if(result == length) {
 		DEBUG("PREAD succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
 	}
 	else if (result <= 0){
@@ -1164,7 +1219,11 @@ RETT_READ _bankshot2_READ(INTF_READ)
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	_bankshot2_fileops->READ(file, buf1, length);
-	integrity_check(buf, buf1, length);
+	error = integrity_check(buf, buf1, result);
+	if (error)
+		MSG("Read: fd %lu, cache ino %llu, offset %llu, length %lu, "
+			"%d errors\n", nvf->fd, nvf->cache_serialno,
+			*nvf->offset - result, length, error);
 	DEBUG("offset: %lu\n", *nvf->offset);
 	free(buf1);
 
@@ -1232,6 +1291,7 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 	char * buf1;
 	buf1 = malloc(count);
 	memset(buf1, '0', count);
+	int error;
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
@@ -1260,8 +1320,11 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	_bankshot2_fileops->PREAD(file, buf1, count, offset);
-	integrity_check(buf, buf1, count);
-	DEBUG("offset: %lu\n", *nvf->offset);
+	error = integrity_check(buf, buf1, result);
+	if (error)
+		MSG("Pread: fd %lu, cache ino %llu, offset %llu, length %lu, "
+			"%d errors\n", nvf->fd, nvf->cache_serialno, offset,
+			count, error);
 	free(buf1);
 
 	return result;
@@ -1478,11 +1541,15 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				NVP_UNLOCK_NODE_RD(nvf, cpuid);
 				NVP_LOCK_NODE_WR(nvf);
 			}
-			DEBUG("Add extent: start offset 0x%llx, mmap_addr 0x%llx, length %llu\n",
-				data.mmap_offset, data.mmap_addr,
-				data.mmap_length);
+			DEBUG("Add extent: cache fd %llu, start offset 0x%llx, "
+				"mmap_addr 0x%llx, length %llu, required %lu\n",
+				nvf->cache_serialno, data.mmap_offset,
+				data.mmap_addr,	data.mmap_length,
+				data.required);
 			add_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.write, data.mmap_addr);
+			integrity_test_extent(nvf, data.mmap_offset,
+				data.mmap_length, data.mmap_addr);
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_WR(nvf);
 				NVP_LOCK_NODE_RD(nvf, cpuid);
@@ -1620,15 +1687,22 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 	read_count = 0;
 	read_offset = offset;
 
+//	if (len_to_read + read_offset > nvf->node->length)
+//		len_to_read = nvf->node->length - read_offset;
+
 	while(len_to_read > 0) {
-		DEBUG("Pread: looking for extent offset %d, size %d\n", read_offset, len_to_read);
+		DEBUG("Pread: looking for extent offset %d, size %d\n",
+			read_offset, len_to_read);
 		file_length = len_to_read;
+//try_again:
 //		clock_gettime(CLOCK_MONOTONIC, &start);
-		ret = bankshot2_get_extent(nvf, read_offset, &extent_length, &mmap_addr,
-						&file_length, READ_EXTENT, buf, 0, cpuid);
+		ret = bankshot2_get_extent(nvf, read_offset, &extent_length,
+			&mmap_addr, &file_length, READ_EXTENT, buf, 0, cpuid);
 //		clock_gettime(CLOCK_MONOTONIC, &end);
 //		printf("get extent time: %lu\n", end.tv_nsec - start.tv_nsec);
-		DEBUG("Pread: get_extent returned %d, length %llu\n", ret, extent_length);
+		DEBUG("Pread: get_extent returned %d, length %llu\n",
+			ret, extent_length);
+
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
 			break;
@@ -1647,10 +1721,11 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 				DEBUG("Near file end. Using read call\n");
 				ssize_t posix_read;
 
-				posix_read = _bankshot2_fileops->PREAD(file, buf, len_to_read,
-										read_offset);
+				posix_read = _bankshot2_fileops->PREAD(file,
+					buf, len_to_read, read_offset);
 				if (read_offset + posix_read > file_length)
-					bankshot2_update_file_length(nvf, read_offset + posix_read);
+					bankshot2_update_file_length(nvf,
+						read_offset + posix_read);
 
 				read_count += posix_read;
 				return read_count;
@@ -1660,6 +1735,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 			if (extent_length > len_to_read)
 				extent_length = len_to_read;
 			goto update_length;
+//			goto try_again;
 		default:
 			break;
 		}
