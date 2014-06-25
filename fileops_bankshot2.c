@@ -1130,7 +1130,7 @@ int integrity_check(const char *buf, char *buf1, size_t length)
 		MSG("ERROR: %d errors in length %lu, from %d to %d\n",
 			count, length, start, end);
 	else
-		DEBUG("Correct: %d %lu\n", i, length);
+		MSG("Correct: %d %lu\n", i, length);
 
 	return count;
 }
@@ -1174,11 +1174,6 @@ void integrity_test_extent(struct NVFile *nvf, uint64_t mmap_offset,
 
 RETT_READ _bankshot2_READ(INTF_READ)
 {
-	char * buf1;
-	buf1 = malloc(length);
-	memset(buf1, '0', length);
-	int error;
-
 	DEBUG("_bankshot2_READ %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
@@ -1218,6 +1213,12 @@ RETT_READ _bankshot2_READ(INTF_READ)
 
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
+#if INTEGRITY_CHECK
+	char * buf1;
+	int error;
+
+	buf1 = malloc(length);
+	memset(buf1, '0', length);
 	_bankshot2_fileops->READ(file, buf1, length);
 	error = integrity_check(buf, buf1, result);
 	if (error)
@@ -1226,6 +1227,7 @@ RETT_READ _bankshot2_READ(INTF_READ)
 			*nvf->offset - result, length, error);
 	DEBUG("offset: %lu\n", *nvf->offset);
 	free(buf1);
+#endif
 
 	return result;
 }
@@ -1288,11 +1290,6 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 
 RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 {
-	char * buf1;
-	buf1 = malloc(count);
-	memset(buf1, '0', count);
-	int error;
-
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
 	DEBUG("_bankshot2_PREAD %d\n", file);
@@ -1319,6 +1316,12 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
+#if INTEGRITY_CHECK
+	char * buf1;
+	int error;
+
+	buf1 = malloc(count);
+	memset(buf1, '0', count);
 	_bankshot2_fileops->PREAD(file, buf1, count, offset);
 	error = integrity_check(buf, buf1, result);
 	if (error)
@@ -1326,6 +1329,7 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 			"%d errors\n", nvf->fd, nvf->cache_serialno, offset,
 			count, error);
 	free(buf1);
+#endif
 
 	return result;
 }
@@ -1548,8 +1552,10 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				data.required);
 			add_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.write, data.mmap_addr);
+#if INTEGRITY_CHECK
 			integrity_test_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.mmap_addr);
+#endif
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_WR(nvf);
 				NVP_LOCK_NODE_RD(nvf, cpuid);
