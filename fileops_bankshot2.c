@@ -62,7 +62,7 @@ struct NVFile* _bankshot2_fd_lookup;
 struct NVNode* _bankshot2_node_lookup;
 
 void _bankshot2_init2(void);
-int _bankshot2_extend_map(struct NVFile *nvf, size_t newlen);
+//int _bankshot2_extend_map(struct NVFile *nvf, size_t newlen);
 void _bankshot2_SIGBUS_handler(int sig);
 void _bankshot2_SIGSEGV_handler(int sig);
 void cache_write_back(struct NVFile *nvf);
@@ -373,7 +373,79 @@ void *memcpy_fsync_flush_on_write(void *dest, const void *src, size_t n)
 long long unsigned int total_memcpy_cycles = 0;
 void report_memcpy_usec(void) { printf("Total memcpy time: %llu cycles: %f seconds\n", total_memcpy_cycles, ((float)(total_memcpy_cycles))/(2.27f*1024*1024*1024) ); }
 #endif
-void bankshot2_clear_mappings(void);
+
+/* ================= Timing ================= */
+
+#define TIMING_NUM	7	// Apply to sizeof timing_category
+
+unsigned long long Countstats[TIMING_NUM];
+unsigned long long Timingstats[TIMING_NUM];
+const char *Timingstring[TIMING_NUM] = 
+{
+	"read",
+	"write",
+	"memcpy_read",
+	"memcpy_write",
+	"Tree_lookup",
+	"Tree_insert",
+	"kernel",
+};
+
+enum timing_category {
+	read_t = 0,
+	write_t,
+	memcpyr_t,
+	memcpyw_t,
+	lookup_t,
+	insert_t,
+	kernel_t,
+};
+
+typedef struct timespec timing_type;
+
+#if MEASURE_TIMING
+
+#define BANKSHOT2_START_TIMING(name, start) \
+	clock_gettime(CLOCK_MONOTONIC, &start)
+
+#define BANKSHOT2_END_TIMING(name, start) \
+	{timing_type end; \
+	 clock_gettime(CLOCK_MONOTONIC, &end); \
+	 Countstats[name]++; \
+	 Timingstats[name] += (end.tv_sec - start.tv_sec) * 1e9 \
+				+ (end.tv_nsec - start.tv_nsec); \
+	}
+
+void bankshot2_print_time_stats(void)
+{
+	int i;
+
+	printf("Bankshot2 timing stats:\n");
+	for (i = 0; i < TIMING_NUM; i++)
+		printf("%s: count %llu, timing %llu, average %llu\n",
+			Timingstring[i], Countstats[i], Timingstats[i],
+			Countstats[i] ? Timingstats[i] / Countstats[i] : 0);
+}
+
+#else
+
+#define BANKSHOT2_START_TIMING(name, start) {}
+
+#define BANKSHOT2_END_TIMING(name, start) \
+	{Countstats[name]++;}
+
+void bankshot2_print_time_stats(void)
+{
+	int i;
+
+	printf("Bankshot2 timing stats:\n");
+	for (i = 0; i < TIMING_NUM; i++)
+		printf("%s: count %llu\n", Timingstring[i], Countstats[i]);
+}
+
+#endif
+
+void bankshot2_exit_handler(void);
 
 void bankshot2_setup_signal_handler(void)
 {
@@ -432,7 +504,7 @@ void _bankshot2_init2(void)
 	MSG("Importing memcpy from %s\n", GLIBC_LOC);
 	*/
 
-	atexit(bankshot2_clear_mappings);
+	atexit(bankshot2_exit_handler);
 }
 
 #if COUNT_EXTENDS
@@ -549,6 +621,13 @@ void bankshot2_clear_mappings(void)
 	pthread_spin_destroy(&node_lookup_lock);
 
 	free(_bankshot2_node_lookup);
+}
+
+void bankshot2_exit_handler(void)
+{
+	bankshot2_clear_mappings();
+
+	bankshot2_print_time_stats();
 }
 
 struct NVNode * bankshot2_allocate_node(void)
@@ -1356,14 +1435,17 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	size_t cached_extent_length;
 	struct bankshot2_cache_data data;
 	size_t request_len = *file_length;
-//	struct timespec start, end;
+	timing_type lookup_time, kernel_time, insert_time;
 	
 	unsigned long cached_extent_start;
 
 	cached_extent_offset = offset;
 
+	BANKSHOT2_START_TIMING(lookup_t, lookup_time);
 	feret = find_extent(nvf, &cached_extent_offset, &cached_extent_length,
 					&cached_extent_start);
+	BANKSHOT2_END_TIMING(lookup_t, lookup_time);
+
 	*file_length = nvf->node->length;
 
 	if (feret == 1) {
@@ -1390,10 +1472,10 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		data.file, data.cache_ino, data.offset, data.size,
 		data.file_length);
 
-//	clock_gettime(CLOCK_MONOTONIC, &start);
+	BANKSHOT2_START_TIMING(kernel_t, kernel_time);
 	ret = copy_to_cache(nvf, &data);
-//	clock_gettime(CLOCK_MONOTONIC, &end);
-//	printf("copy to cache time: %lu\n", end.tv_nsec - start.tv_nsec);
+	BANKSHOT2_END_TIMING(kernel_t, kernel_time);
+
 	DEBUG("copy_to_cache return %d, offset %llu, start %llu, length %llu\n",
 		ret, data.extent_start_file_offset, data.extent_start,
 		data.extent_length);
@@ -1401,7 +1483,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	if (ret == 0) {
 		if (data.mmap_length) {
 			// Acquire node write lock for add_extent
-//			clock_gettime(CLOCK_MONOTONIC, &start);
+			BANKSHOT2_START_TIMING(insert_t, insert_time);
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_RD(nvf, cpuid);
 				NVP_LOCK_NODE_WR(nvf);
@@ -1419,8 +1501,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				NVP_UNLOCK_NODE_WR(nvf);
 				NVP_LOCK_NODE_RD(nvf, cpuid);
 			}
-//			clock_gettime(CLOCK_MONOTONIC, &end);
-//			printf("Add extent time: %lu\n", end.tv_nsec - start.tv_nsec);
+			BANKSHOT2_END_TIMING(insert_t, insert_time);
 		}
 		bankshot2_update_file_length(nvf, data.file_length);
 		ret = 5;
@@ -1482,9 +1563,9 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 	size_t read_count, extent_length;
 	size_t file_length;
 	unsigned long mmap_addr = 0;
-	
-//	struct timespec start, end;
+	timing_type read_time, memcpy_time;
 
+	BANKSHOT2_START_TIMING(read_t, read_time);
 	ssize_t available_length = (nvf->node->length) - offset;
 
 	if(UNLIKELY(!nvf->canRead)) {
@@ -1624,10 +1705,9 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 			void* result =
 #endif
 //				memcpy(buf, (char *)mmap_addr, extent_length);
-//				clock_gettime(CLOCK_MONOTONIC, &start);
+				BANKSHOT2_START_TIMING(memcpyr_t, memcpy_time);
 				memcpy1(buf, (char *)mmap_addr, extent_length);
-//				clock_gettime(CLOCK_MONOTONIC, &end);
-//				printf("memcpy time: %lu\n", end.tv_nsec - start.tv_nsec);
+				BANKSHOT2_END_TIMING(memcpyr_t, memcpy_time);
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
@@ -1666,6 +1746,8 @@ update_length:
 	DO_MSYNC(nvf);
 
 	DEBUG("Return read_count %lu\n", read_count);
+	BANKSHOT2_END_TIMING(read_t, read_time);
+
 	return read_count;
 }
 
@@ -1680,6 +1762,9 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	unsigned long mmap_addr = 0;
 	size_t file_length;
 	char *new_buf;
+	timing_type write_time, memcpy_time;
+
+	BANKSHOT2_START_TIMING(write_t, write_time);
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
@@ -1852,7 +1937,9 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 #else
 			void* result =
 #endif
+				BANKSHOT2_START_TIMING(memcpyw_t, memcpy_time);
 				FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
+				BANKSHOT2_END_TIMING(memcpyw_t, memcpy_time);
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
@@ -1889,6 +1976,7 @@ update_length:
 	}
 	DO_MSYNC(nvf);
 	DEBUG("_bankshot2_do_pwrite returned %lu\n", count);
+	BANKSHOT2_END_TIMING(write_t, write_time);
 
 	return count;
 }
