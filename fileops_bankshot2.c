@@ -953,6 +953,7 @@ static ssize_t _bankshot2_check_write_size_valid(size_t count)
 	return count;
 }
 
+#if INTEGRITY_CHECK
 int integrity_check(const char *buf, char *buf1, size_t length)
 {
 	int i = 0;
@@ -1016,6 +1017,60 @@ void integrity_test_extent(struct NVFile *nvf, uint64_t mmap_offset,
 			mmap_offset, mmap_offset, i, length);
 }
 
+void bankshot2_read_check(struct NVFile *nvf, ssize_t result, INTF_READ)
+{
+	char * buf1;
+	int error;
+
+	buf1 = malloc(length);
+	memset(buf1, '0', length);
+	_bankshot2_fileops->READ(file, buf1, length);
+	error = integrity_check(buf, buf1, result);
+	if (error)
+		MSG("Read: fd %lu, cache ino %llu, offset %llu, length %lu, "
+			"%d errors\n", nvf->fd, nvf->cache_serialno,
+			*nvf->offset - result, length, error);
+	DEBUG("offset: %lu\n", *nvf->offset);
+	free(buf1);
+}
+
+void bankshot2_write_check(INTF_WRITE)
+{
+	_bankshot2_fileops->WRITE(CALL_WRITE);
+}
+
+void bankshot2_pread_check(struct NVFile *nvf, ssize_t result, INTF_PREAD)
+{
+	char * buf1;
+	int error;
+
+	buf1 = malloc(count);
+	memset(buf1, '0', count);
+	_bankshot2_fileops->PREAD(file, buf1, count, offset);
+	error = integrity_check(buf, buf1, result);
+	if (error)
+		MSG("Pread: fd %lu, cache ino %llu, offset %llu, length %lu, "
+			"%d errors\n", nvf->fd, nvf->cache_serialno, offset,
+			count, error);
+	free(buf1);
+}
+
+void bankshot2_pwrite_check(INTF_PWRITE)
+{
+	_bankshot2_fileops->PWRITE(CALL_PWRITE);
+}
+
+#else
+
+void bankshot2_read_check(struct NVFile *nvf, ssize_t result, INTF_READ) {}
+void bankshot2_write_check(INTF_WRITE) {}
+void bankshot2_pread_check(struct NVFile *nvf, ssize_t result, INTF_PREAD) {}
+void bankshot2_pwrite_check(INTF_PWRITE) {}
+void integrity_test_extent(struct NVFile *nvf, uint64_t mmap_offset,
+		size_t length, unsigned long mmap_addr) {}
+
+#endif
+
 RETT_READ _bankshot2_READ(INTF_READ)
 {
 	DEBUG("_bankshot2_READ %d\n", file);
@@ -1057,21 +1112,7 @@ RETT_READ _bankshot2_READ(INTF_READ)
 
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
-#if INTEGRITY_CHECK
-	char * buf1;
-	int error;
-
-	buf1 = malloc(length);
-	memset(buf1, '0', length);
-	_bankshot2_fileops->READ(file, buf1, length);
-	error = integrity_check(buf, buf1, result);
-	if (error)
-		MSG("Read: fd %lu, cache ino %llu, offset %llu, length %lu, "
-			"%d errors\n", nvf->fd, nvf->cache_serialno,
-			*nvf->offset - result, length, error);
-	DEBUG("offset: %lu\n", *nvf->offset);
-	free(buf1);
-#endif
+	bankshot2_read_check(nvf, result, CALL_READ);
 
 	return result;
 }
@@ -1128,9 +1169,7 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
-#if INTEGRITY_CHECK
-	_bankshot2_fileops->WRITE(CALL_WRITE);
-#endif
+	bankshot2_write_check(CALL_WRITE);
 
 	return result;
 }
@@ -1163,20 +1202,7 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
-#if INTEGRITY_CHECK
-	char * buf1;
-	int error;
-
-	buf1 = malloc(count);
-	memset(buf1, '0', count);
-	_bankshot2_fileops->PREAD(file, buf1, count, offset);
-	error = integrity_check(buf, buf1, result);
-	if (error)
-		MSG("Pread: fd %lu, cache ino %llu, offset %llu, length %lu, "
-			"%d errors\n", nvf->fd, nvf->cache_serialno, offset,
-			count, error);
-	free(buf1);
-#endif
+	bankshot2_pread_check(nvf, result, CALL_PREAD);
 
 	return result;
 }
@@ -1222,9 +1248,7 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
-#if INTEGRITY_CHECK
-	_bankshot2_fileops->PWRITE(CALL_PWRITE);
-#endif
+	bankshot2_pwrite_check(CALL_PWRITE);
 
 	return result;
 }
@@ -1389,10 +1413,8 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				data.required);
 			add_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.write, data.mmap_addr);
-#if INTEGRITY_CHECK
 			integrity_test_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.mmap_addr);
-#endif
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_WR(nvf);
 				NVP_LOCK_NODE_RD(nvf, cpuid);
