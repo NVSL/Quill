@@ -63,10 +63,8 @@ struct NVNode* _bankshot2_node_lookup;
 
 void _bankshot2_init2(void);
 int _bankshot2_extend_map(struct NVFile *nvf, size_t newlen);
-int _bankshot2_test_mmap(int file, size_t newlen);
 void _bankshot2_SIGBUS_handler(int sig);
 void _bankshot2_SIGSEGV_handler(int sig);
-void _bankshot2_test_invalidate_node(struct NVFile* nvf);
 void cache_write_back(struct NVFile *nvf);
 
 RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like PWRITE, but without locks (called by _bankshot2_WRITE)
@@ -391,13 +389,7 @@ void _bankshot2_init2(void)
 	#if TIME_READ_MEMCPY
 //	atexit(report_memcpy_usec);
 	#endif
-#if 0
-	cache_path = getenv("CACHE_PATH");      
-	if (!cache_path) {
-		ERROR("Invalid cache path.\n");
-		assert(0);
-	}
-#endif
+
 	_bankshot2_write_pwrite_lock_handoff = 0;
 
 	assert(!posix_memalign(((void**)&_bankshot2_zbuf), 4096, 4096));
@@ -440,14 +432,6 @@ void _bankshot2_init2(void)
 	MSG("Importing memcpy from %s\n", GLIBC_LOC);
 	*/
 
-//	_bankshot2_debug_handoff();
-#if 0
-	bankshot2_ctrl_fd = _bankshot2_fileops->OPEN(bankshot2_ctrl_dev, O_RDWR);
-	if (!bankshot2_ctrl_fd) {
-		ERROR("Failed to open bankshot2 ctrl dev.\n");
-		assert(0);
-	}
-#endif
 	atexit(bankshot2_clear_mappings);
 }
 
@@ -462,35 +446,6 @@ void _bankshot2_print_extend_stats(void)
 	DEBUG("NVP: writes which extended: %li\n", _bankshot2_wr_extended);
 	DEBUG("NVP: total writes         : %li\n", _bankshot2_wr_total);
 	//DEBUG("NVP: extended/total       : %f\n", ((float)_bankshot2_wr_extended)/(_bankshot2_wr_extended+_bankshot2_wr_total));
-}
-#endif
-
-#if 0
-static char* _bankshot2_get_cachefile_path(const char *path)
-{
-	char *path_to_cachefile;
-	char *filename;
-	int size = strlen(cache_path);
-
-	filename = basename(path);
-	path_to_cachefile = malloc(size + strlen(filename) + 2);
-	if (!path_to_cachefile)
-	{
-		DEBUG("Failed to allocate cache file name\n");
-		assert(0);
-	}
-
-	strcpy(path_to_cachefile, cache_path);
-	if (path_to_cachefile[size - 1] == '/') {
-		strcpy(path_to_cachefile + size, filename);
-		path_to_cachefile[size + strlen(filename)] = '\0';
-	} else {
-		path_to_cachefile[size] = '/';
-		strcpy(path_to_cachefile + size + 1, filename);
-		path_to_cachefile[size + strlen(filename) + 1] = '\0';
-	}
-
-	return path_to_cachefile;
 }
 #endif
 
@@ -549,16 +504,6 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	nvf->cache_serialno = data.cache_ino;
 	DEBUG("Assign cache ino %d\n", nvf->cache_serialno);
 
-/*
-	nvf->node->maxPerms |= (nvf->canRead)?PROT_READ:0;
-
-	if( (!FLAGS_INCLUDE(nvf->node->maxPerms, PROT_WRITE)) && nvf->canWrite)
-	{
-		DEBUG("Map didn't have write perms, but it's about to.  We're going to need a new map.\n");
-		nvf->node->maxPerms |= PROT_WRITE;
-		//_bankshot2_extend_map(nvf->fd, nvf->node->maplength+1); // currently set to get a new map every time
-	}
-*/
 	SANITYCHECK(nvf->node->cache_length >= 0);
 
 	if(FLAGS_INCLUDE(oflag, O_TRUNC) && nvf->node->cache_length)
@@ -566,46 +511,6 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 		DEBUG("We just opened a file with O_TRUNC that was already open with nonzero length %li.  Updating length.\n", nvf->node->length);
 		nvf->node->cache_length = 0;
 	}
-/*
-	if(stat(path, &file_st)) // in case of multithreading it's good to update.  // TODO this is obviously a race condition...
-	{
-		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
-		assert(0);
-	}
-*/
-//	SANITYCHECK(nvf->node->cache_length == data.cache_file_size);
-
-//	DEBUG("Meh, why not allocate a new map every time\n");
-	//nvf->node->maplength = -1;
-
-//	if(nvf->node->maplength < nvf->node->length)
-//	{
-//		DEBUG("map was not already allocated (was %li).  Let's allocate one.\n", nvf->node->maplength);
-//		_bankshot2_extend_map(nvf->fd, nvf->node->length);
-	
-		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
-# if 0
-	MSG("Try to mmap file %s, fd %d, cache inode %lu\n", path, nvf->fd, nvf->cache_serialno);
-	if(_bankshot2_extend_map(nvf, MAX(1, nvf->node->cache_length)))
-	{
-		MSG("Failed to mmap cache fd %d. Don't cache it, just use Posix.\n");
-		return -1;
-	}
-
-	SANITYCHECK(nvf->node->maplength > 0);
-	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length);
-
-	if(nvf->node->data < 0) {
-		ERROR("Failed to mmap path %s: %s\n", path, strerror(errno));
-		assert(0);
-	}
-
-	MSG("mmap successful.  result: %p\n", nvf->node->data);
-//	}
-#endif
-
-//	SANITYCHECK(nvf->node->cache_length >= 0);
-//	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length);
 
 	DO_MSYNC(nvf);
 
@@ -902,17 +807,11 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		nvf->canWrite = 1;
 	} else if(oflag&O_WRONLY) {
 		DEBUG("oflag (%i) specifies O_WRONLY for fd %i\n", oflag, result);
-		#if 0
-		oflag |= O_RDWR;
-		nvf->canRead = 1;
-		nvf->canWrite = 1;
-		#else
 		MSG("File %s is opened O_WRONLY.\n", path);
 		MSG("Does not support mmap, we will try a cache file with O_RDWR.\n");
 //		nvf->posix = 1;
 		nvf->canRead = 0;
 		nvf->canWrite = 1;
-		#endif
 	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
 		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n", oflag, result);
 		nvf->canRead = 1;
@@ -930,16 +829,6 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		nvf->append = 0;
 	}
 
-/*
-	nvf->node->maxPerms |= (nvf->canRead)?PROT_READ:0;
-
-	if( (!FLAGS_INCLUDE(nvf->node->maxPerms, PROT_WRITE)) && nvf->canWrite)
-	{
-		DEBUG("Map didn't have write perms, but it's about to.  We're going to need a new map.\n");
-		nvf->node->maxPerms |= PROT_WRITE;
-		//_bankshot2_extend_map(nvf->fd, nvf->node->maplength+1); // currently set to get a new map every time
-	}
-*/
 	SANITYCHECK(nvf->node != NULL);
 	SANITYCHECK(nvf->node->length >= 0);
 
@@ -948,39 +837,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		DEBUG("We just opened a file with O_TRUNC that was already open with nonzero length %li.  Updating length.\n", nvf->node->length);
 		nvf->node->length = 0;
 	}
-/*
-	if(stat(path, &file_st)) // in case of multithreading it's good to update.  // TODO this is obviously a race condition...
-	{
-		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
-		assert(0);
-	}
-*/
 	SANITYCHECK(nvf->node->length == file_st.st_size);
-
-	DEBUG("Meh, why not allocate a new map every time\n");
-	//nvf->node->maplength = -1;
-
-//	path_to_cachefile = _bankshot2_get_cachefile_path(path);
-//	MSG("Cache filename: %s\n", path_to_cachefile);
-
-//	if(nvf->node->maplength < nvf->node->length)
-//	{
-//		DEBUG("map was not already allocated (was %li).  Let's allocate one.\n", nvf->node->maplength);
-//		_bankshot2_extend_map(nvf->fd, nvf->node->length);
-	
-		//if(_bankshot2_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
-//	if(_bankshot2_extend_map(nvf->fd, MAX(1, nvf->node->length)))
-#if 0
-	if(skip_mmap_test == 0 && _bankshot2_test_mmap(nvf->fd, MAX(1, nvf->node->length)))
-	{
-		MSG("Failed to mmap fd %d. Don't cache it, just use Posix.\n");
-		NVP_UNLOCK_NODE_WR(nvf);
-		NVP_UNLOCK_FD_WR(nvf);
-		free(path_to_cachefile);
-		nvf->posix = 1;
-		return nvf->fd;
-	}
-#endif
 
 	/* This is a nasty workaround for FIO */
 	if (path[0] == '/' && path[1] == 's'
@@ -1003,8 +860,6 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		assert(0);
 	}
 
-//	DEBUG("mmap successful.  result: %p\n", nvf->node->data);
-//	}
 
 	SANITYCHECK(nvf->node->length >= 0);
 	SANITYCHECK(nvf->node->maplength > nvf->node->length);
@@ -1027,7 +882,6 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	NVP_UNLOCK_FD_WR(nvf);
 
 	errno = 0;
-//	free(path_to_cachefile);
 	return nvf->fd;
 }
 
@@ -1047,25 +901,15 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 		return _bankshot2_fileops->CLOSE(CALL_CLOSE);
 	}
 
-	//int iter;
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_WR(nvf);
 
-//	cache_write_back(nvf);
 	nvf->valid = 0;
 	nvf->node->reference--;
 	DEBUG("fd %d, cache ino %d\n", nvf->fd, nvf->cache_serialno);
 
-	//_bankshot2_test_invalidate_node(nvf);
-
-//	_bankshot2_fileops->CLOSE(nvf->cache_fd);
 	RETT_CLOSE result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
-
-//	DEBUG("Send IOCTL_REMOVE_MAPPING request\n");
-//	uint64_t cache_ino = nvf->cache_serialno;
-//	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
-//				BANKSHOT2_IOCTL_REMOVE_MAPPING, &cache_ino);
 
 	NVP_UNLOCK_NODE_WR(nvf);
 	NVP_UNLOCK_FD_WR(nvf);
@@ -1243,7 +1087,6 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 		return _bankshot2_fileops->WRITE(CALL_WRITE);
 	}
 
-	//int iter;
 	int cpuid = GET_CPUID();
 
 	RETT_WRITE result = _bankshot2_check_write_size_valid(length);
@@ -1462,7 +1305,6 @@ void cache_write_back(struct NVFile *nvf)
 	{
 		DEBUG("extent: dirty %d, offset %lu, count %d, mmap addr %lx\n",
 			dirty, write_offset, write_count, mmap_addr);
-//			*(char *)mmap_addr);
 		if (dirty)
 			cache_write_back_extent(nvf, write_offset, write_count,
 						mmap_addr);
@@ -1523,19 +1365,6 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		"offset %llu, size %llu, length %llu\n",
 		data.file, data.cache_ino, data.offset, data.size,
 		data.file_length);
-
-//	data.map_length = request_len > MAP_UNIT ? request_len : MAP_UNIT;
-
-# if 0
-		if (ret == 2) {
-			// Copy the covered part first
-			covered_size = read_count - (offset - read_offset);
-			memcpy1(buf, (char *)(mmap_addr + offset - read_offset), covered_size);
-			buf += covered_size;
-			read_offset += read_count;
-			read_count = len_to_read - covered_size;
-		}
-#endif
 
 //	clock_gettime(CLOCK_MONOTONIC, &start);
 	ret = copy_to_cache(nvf, &data);
@@ -1708,7 +1537,6 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 		DEBUG("Pread: looking for extent offset %d, size %d\n",
 			read_offset, len_to_read);
 		file_length = len_to_read;
-//try_again:
 //		clock_gettime(CLOCK_MONOTONIC, &start);
 		ret = bankshot2_get_extent(nvf, read_offset, &extent_length,
 			&mmap_addr, &file_length, READ_EXTENT, buf, 0, cpuid);
@@ -1825,15 +1653,11 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	int ret = 0;
 	int segfault;
 	off_t write_offset;
-//	off_t origin_offset;
 	size_t write_count, extent_length;
 	size_t posix_write;
-//	size_t origin_len, fix_len;
 	unsigned long mmap_addr = 0;
 	size_t file_length;
 	char *new_buf;
-//	int fix_mode;
-//	char temp_buf[PAGE_SIZE];
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
@@ -1874,21 +1698,6 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		}
 	}
 
-#if 0
-	int intersects = 0;
-
-	if( buf == (void*)nvf->node->data ) { intersects = 1; }
-	if( (buf > (void*)nvf->node->data) && (buf <= (void*)nvf->node->data + nvf->node->maplength) ) { intersects = 1; }
-	if( (buf < (void*)nvf->node->data) && (buf+count >= (void*)nvf->node->data) ) { intersects = 1; }
-
-	if(UNLIKELY(intersects))
-	{
-		DEBUG("Buffer intersects with map (buffer %p len %p, map %p to %p)\n", buf, count, nvf->node->data, nvf->node->data-nvf->node->maplength);
-		assert(0);
-		return -1;
-	}
-#endif
-	
 	if(nvf->append)
 	{
 		DEBUG("this fd (%i) is O_APPEND; setting offset from the passed value (%li) to the end of the file (%li) prior to writing anything\n", nvf->fd, offset, nvf->node->length);
@@ -1899,7 +1708,6 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 
 	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->length, offset, extension, count);
 
-//	extension = 0;
 #if 0
 	if(extension > 0)
 	{
@@ -1910,18 +1718,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
 			count, nvf->node->length, offset, count, extension);
 		
-		if( offset+count >= nvf->node->cache_length )
-		{
-			DEBUG("Request will also extend map; doing that before extending file.\n");
-//			_bankshot2_extend_map(nvf, offset+count );
-		} else {
-			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->cache_length, offset+count);
-			SANITYCHECK(nvf->node->cache_length > (offset+count));
-		}
-
 		DEBUG("Done extending map(s), now let's exend the file with PWRITE ");
-
-//volatile int asdf=1; while(asdf){};
 
 		ssize_t temp_result;
 		if(nvf->aligned) {
@@ -1950,24 +1747,8 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	}
 #endif
 
-//	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p (%p+%li), %p, %li)\n", nvf->node->data+offset, nvf->node->data, offset, buf, count);
-	
-	if(extension > 0)
-	{
-//		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->cache_length, (nvf->node->length+extension));
-//		SANITYCHECK( (nvf->node->length+extension) < nvf->node->cache_length);
-	}
-	else
-	{
-		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->cache_length, nvf->node->length);
-		SANITYCHECK( (nvf->node->length) < nvf->node->cache_length);
-	}
-
 	SANITYCHECK(nvf->valid);
 	SANITYCHECK(nvf->node != NULL);
-//	SANITYCHECK(nvf->node->data != NULL);
-//	SANITYCHECK(nvf->node->maplength > nvf->node->cache_length + ((extension>0)?extension:0));
-//	SANITYCHECK(nvf->node->data+offset > 0);
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
 
@@ -1979,38 +1760,6 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	new_buf = (char *)buf;
 
 	while(len_to_write > 0) {
-		// If offset is unaligned to page or the length is smaller
-		// than PAGE_SIZE, we need to read the data first
-#if 0
-		if ((write_offset % PAGE_SIZE) || (len_to_write < PAGE_SIZE)) {
-			origin_buf = new_buf;
-			if (write_offset % PAGE_SIZE == 0) {
-				// len_to_write < PAGE_SIZE
-				fix_mode = 1;
-
-				_bankshot2_do_pread(file, temp_buf, PAGE_SIZE, write_offset);
-				memcpy(temp_buf, buf, len_to_write);
-			} else {
-				fix_mode = 2;
-
-				origin_offset = write_offset;
-				origin_len = len_to_write;
-				fix_len = len_to_write;
-
-				len_to_write = PAGE_SIZE;
-				write_offset -= (write_offset % PAGE_SIZE);
-
-				_bankshot2_do_pread(file, temp_buf, PAGE_SIZE, write_offset);
-				if (fix_len >= (PAGE_SIZE - (origin_offset - write_offset)))
-					fix_len = PAGE_SIZE - (origin_offset - write_offset);
-
-				memcpy(temp_buf + (origin_offset - write_offset),
-						buf, fix_len);
-				len_to_write = origin_offset - write_offset + fix_len;
-			}
-			buf = temp_buf;
-		}
-#endif
 		DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, len_to_write);
 		file_length = len_to_write;
 		ret = bankshot2_get_extent(nvf, write_offset, &extent_length, &mmap_addr,
@@ -2018,9 +1767,6 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		DEBUG("Pwrite: get_extent returned %d, length %llu\n", ret, extent_length);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
-//			if ((write_offset % 2097152) == 0)
-//				ERROR("Pwrite: write_offset %u, mmap addr 0x%llx, length %u\n",
-//					write_offset, mmap_addr, len_to_write);
 			break;
 		case 1:	// We have some big troubles.
 			return write_count;
@@ -2084,7 +1830,6 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 #else
 			void* result =
 #endif
-//			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
 				FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
 		} else if (segfault == 1) {
 			segfault = 0;
@@ -2110,27 +1855,15 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 #if TIME_READ_MEMCPY
 		uint64_t end_time = getcycles();
 		total_memcpy_cycles += end_time - start_time;
-//		if(cpu != get_cpuid()) {
-//			printf("cpuid changed\n");
-//			exit(1);
-//		}
 #endif
 
 		SANITYCHECK(result == buf);
 		SANITYCHECK(result > 0);
 update_length:
-//		if (fix_mode == 2) {
-//			len_to_write = origin_len - fix_len;
-//			write_offset = origin_offset + fix_len;
-//			buf = origin_buf + fix_len; 
-//			write_count += fix_len;
-//		} else {
 		len_to_write -= extent_length;
 		write_offset += extent_length;
 		write_count  += extent_length;
 		buf += extent_length;
-//		}
-//		fix_mode = 0;
 	}
 	DO_MSYNC(nvf);
 	DEBUG("_bankshot2_do_pwrite returned %lu\n", count);
@@ -2157,20 +1890,10 @@ RETT_SEEK64 _bankshot2_SEEK64(INTF_SEEK64)
 		return _bankshot2_fileops->SEEK64(CALL_SEEK64);
 	}
 
-	/* lseek() needs to populated to file system */
+	/* lseek() needs to populate to file system */
 	_bankshot2_fileops->SEEK64(CALL_SEEK64);
 
-	/* Use atomic operation to update offset */
-//	int cpuid = GET_CPUID();
-
-//	NVP_LOCK_FD_WR(nvf);
-//	NVP_CHECK_NVF_VALID_WR(nvf);
-//	NVP_LOCK_NODE_RD(nvf, cpuid);
-
 	RETT_SEEK64 result =  _bankshot2_do_seek64(CALL_SEEK64);	
-
-//	NVP_UNLOCK_NODE_RD(nvf, cpuid);
-//	NVP_UNLOCK_FD_WR(nvf);
 
 	return result;
 }
@@ -2275,8 +1998,6 @@ RETT_TRUNC64 _bankshot2_TRUNC64(INTF_TRUNC64)
 	}
 
 	DO_MSYNC(nvf);
-
-//	assert(!munmap(nvf->node->data, nvf->node->maplength));
 
 	int result = _bankshot2_fileops->TRUNC64(CALL_TRUNC64);
 
@@ -2391,7 +2112,6 @@ RETT_DUP _bankshot2_DUP(INTF_DUP)
 	if (nvf->posix) {
 		DEBUG("Call posix DUP for fd %d\n", nvf->fd);
 		nvf2->posix = nvf->posix;
-//		nvf2->cache_fd = nvf->cache_fd;
 		NVP_UNLOCK_NODE_WR(nvf);
 		NVP_UNLOCK_FD_WR(nvf);
 		return result;
@@ -2416,13 +2136,13 @@ RETT_DUP _bankshot2_DUP(INTF_DUP)
 	nvf2->append 	= nvf->append;
 	nvf2->aligned   = nvf->aligned;
 	nvf2->serialno 	= nvf->serialno;
+	nvf2->cache_serialno = nvf->cache_serialno;
 	nvf2->node 	= nvf->node;
 	nvf2->posix 	= nvf->posix;
-//	nvf2->cache_fd	= nvf->cache_fd;
 
 	SANITYCHECK(nvf2->node != NULL);
 
-	nvf2->valid 	= 1;
+	nvf2->valid	= 1;
 
 	DO_MSYNC(nvf);
 	DO_MSYNC(nvf2);
@@ -2452,27 +2172,13 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	struct NVFile* nvf2 = &_bankshot2_fd_lookup[fd2];
 
-#if 0
-	/* We want to DUP the cache fd actually */
-	file = nvf->cache_fd;
-
-	if(file == fd2)
-	{
-		DEBUG("Input and output files were the same (%i)\n", file);
-		return file;
-	}
-#endif
-
 	if (nvf->posix) {
 		DEBUG("Call posix DUP2 for fd %d\n", nvf->fd);
 		nvf2->posix = nvf->posix;
 		int result = _bankshot2_fileops->DUP2(CALL_DUP2);
 		nvf2->fd = result;
-//		nvf2->cache_fd = nvf->cache_fd;
 		return result;
 	}
-
-	//int iter;
 
 	if(file > fd2)
 	{
@@ -2522,8 +2228,6 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	
 	if(nvf2->node && nvf->node != nvf2->node) { NVP_UNLOCK_NODE_WR(nvf2); }
 
-	_bankshot2_test_invalidate_node(nvf2);
-
 	if(result != fd2)
 	{
 		WARNING("result of _bankshot2_DUP2(%i, %i) didn't return the fd2 that was just closed.  Technically this doesn't violate POSIX, but I DON'T LIKE IT.  (Got %i, expected %i)\n",
@@ -2550,10 +2254,10 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	nvf2->append = nvf->append;
 	nvf2->aligned = nvf->aligned;
 	nvf2->serialno = nvf->serialno;
+	nvf2->cache_serialno = nvf->cache_serialno;
 	nvf2->node = nvf->node;
 	nvf2->valid = nvf->valid;
 	nvf2->posix = nvf->posix;
-//	nvf2->cache_fd = nvf->cache_fd;
 
 	SANITYCHECK(nvf2->node != NULL);
 	SANITYCHECK(nvf2->valid);
@@ -2630,6 +2334,7 @@ static int _bankshot2_get_fd_with_max_perms(struct NVFile *nvf, int file, int *m
 	return fd_with_max_perms;
 }
 
+#if 0
 int _bankshot2_extend_map(struct NVFile *nvf, size_t newcharlen)
 {
 	int file = nvf->fd;
@@ -2790,151 +2495,7 @@ int _bankshot2_extend_map(struct NVFile *nvf, size_t newcharlen)
 #endif
 	return 0;
 }
-
-int _bankshot2_test_mmap(int file, size_t newcharlen)
-{
-	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
-	int ret = 0;
-
-	size_t newmaplen = (newcharlen/MMAP_PAGE_SIZE + 1)*MMAP_PAGE_SIZE;
-	
-	if(nvf->node->maplength > 0) {
-		newmaplen *= 2;
-	}
-	
-	//int newmaplen = newcharlen + 1;
-
-	SANITYCHECK(nvf->node != NULL);
-	//SANITYCHECK(nvf->node->valid);
-	//SANITYCHECK(newmaplen > nvf->node->maplength);
-	SANITYCHECK(newmaplen > newcharlen);
-
-	if(newmaplen < nvf->node->maplength)
-	{
-		DEBUG("Just kidding, _bankshot2_extend_map is actually going to SHRINK the map from %li to %li\n", nvf->node->maplength, newmaplen);
-	}
-	else
-	{
-		DEBUG("_bankshot2_extend_map increasing map length from %li to %li\n", nvf->node->maplength, newmaplen);
-	}
-
-/*	// munmap first
-	if(nvf->node->data != NULL) {
-		DEBUG("Let's try munmapping every time.\n");
-
-		if(munmap(nvf->node->data, nvf->node->maplength))
-		{
-			ERROR("Couldn't munmap: %s\n", strerror(errno));
-		}
-	}
-*/
-	
-	int fd_with_max_perms = file; // may not be marked as valid
-	int max_perms = ((nvf->canRead)?PROT_READ:0)|((nvf->canWrite)?PROT_WRITE:0);
-
-	SANITYCHECK(max_perms);
-//	SANITYCHECK(FLAGS_INCLUDE(max_perms, PROT_READ));
-
-//	DEBUG("newcharlen is %li bytes (%li MB) (%li GB)\n", newcharlen, newcharlen/1024/1024, newcharlen/1024/1024/1024);
-
-	fd_with_max_perms = _bankshot2_get_fd_with_max_perms(nvf, file, &max_perms);
-/*
-	if(nvf->node->maxPerms != max_perms)
-	{
-		DEBUG("Max perms for node %p are changing (to %i).\n", nvf->node, max_perms);
-	}
-*/
-	if(file != fd_with_max_perms) {
-		DEBUG("Was going to extend map with fd %i, but changed to %i because it has higher perms\n", file, fd_with_max_perms);
-	} else {
-		DEBUG("Going to extend map with the same fd that was called (%i)\n", file);
-	}
-
-	DEBUG("Requesting read perms? %s   Requesting write perms? %s\n", ((FLAGS_INCLUDE(max_perms, PROT_READ)?"yes":"no")), ((FLAGS_INCLUDE(max_perms, PROT_WRITE)?"yes":"no")));
-
-//	nvf->node->maxPerms = max_perms;
-
-#ifndef MAP_HUGETLB
-#define MAP_HUGETLB 0x40000 /* arch specific */
 #endif
-
-
-	// mmap replaces old maps where they intersect
-	char* result = (char*) FSYNC_MMAP
-	(
-		nvf->node->data,
-		newmaplen,
-		max_perms, //max_perms,
-		MAP_SHARED //|  MAP_HUGETLB
-		#if MMAP_PREFAULT
-			|MAP_POPULATE
-		#endif
-		,
-		fd_with_max_perms, //fd_with_max_perms,
-		0
-	);
-
-	if( result == MAP_FAILED || result == NULL )
-	{
-		MSG("mmap failed for fd %i: %s\n", nvf->fd, strerror(errno));
-		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
-		nvf->posix = 1;
-		ret = -1;
-	}
-	else
-	{
-		DEBUG("mmap succeed. Unmap it and create a cache file.\n");
-		munmap(result, newmaplen);
-	}
-
-	return ret;
-}
-
-void _bankshot2_test_invalidate_node(struct NVFile* nvf)
-{
-	struct NVNode* node = nvf->node;
-
-	DEBUG("munmapping temporarily diabled...\n"); // TODO
-
-	return;
-
-	SANITYCHECK(node!=NULL);
-
-	int do_munmap = 1;
-
-	int i;
-	for(i=0; i<OPEN_MAX; i++)
-	{
-		if( (_bankshot2_fd_lookup[i].valid) && (node==_bankshot2_fd_lookup[i].node) )
-		{
-			do_munmap = 0;
-			break;
-		}
-	}
-
-	if(do_munmap)
-	{
-		DEBUG("Node appears not to be in use anymore.  munmapping.\n");
-
-		if(munmap(node->data, node->maplength))
-		{
-			ERROR("Coudln't munmap file! %s\n", strerror(errno));
-			assert(0);
-		}
-		
-//		pthread_rwlock_destroy(&node->lock);
-
-//		free(node);
-
-		nvf->node = NULL; // we don't want anyone using this again
-		
-		DEBUG("munmap successful.\n");
-	}
-	else
-	{
-		DEBUG("Node appears to still be in use.  Not munmapping.\n");
-	}
-}
 
 void _bankshot2_SIGBUS_handler(int sig)
 {
