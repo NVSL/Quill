@@ -131,7 +131,6 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 	size_t extent_length;
 	unsigned long extent_mmap_addr;
 	int compVal;
-	int no_new = 0;
 
 	/* Offset and length must be aligned to PAGE_SIZE */
 	if (offset != ALIGN_DOWN(offset) || length != ALIGN_DOWN(length)) {
@@ -151,6 +150,7 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 	extent_length = length;
 	extent_mmap_addr = mmap_addr;
 
+retry:
 	temp = &(node->extent_tree.rb_node);
 	parent = NULL;
 
@@ -165,24 +165,44 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 		} else if (compVal == 1) {
 			temp = &((*temp)->rb_right);
 		} else { 
-		/* Found existing extent */
-			if (extent_offset != curr->offset
-					|| extent_length != curr->count
-					|| extent_mmap_addr != curr->mmap_addr)
-				ERROR("%s: Found unmatch existing extent: "
-					"insert offset 0x%lx, length %lu, "
-					"mmap_addr 0x%lx, existing offset "
-					"0x%lx, length %lu, mmap_addr 0x%lx\n",
+			/* Found existing extent */
+			if (extent_offset != curr->offset) {
+				ERROR("Insert new offset not match: "
+					"cache fd %llu, offset 0x%lx, "
+					"length %lu, existing offset 0x%lx, "
+					"length %lu\n", nvf->cache_serialno,
+					extent_offset, extent_length,
+					curr->offset, curr->count);
+				return;
+			}
+			if (extent_length <= curr->count) {
+				MSG("%s: Found match existing extent: "
+					"offset 0x%lx, length %lu, "
+					"mmap_addr 0x%lx, "
+					"existing offset 0x%lx, length %lu, "
+					"mmap addr 0x%lx\n",
 					__func__, extent_offset, extent_length,
 					extent_mmap_addr, curr->offset,
 					curr->count, curr->mmap_addr);
-			no_new = 1;
-			break;
+				return;
+			}
+			/* We may need to extend the mapping */
+			if (extent_mmap_addr == curr->mmap_addr) {
+				curr->count = extent_length;
+				new = curr;
+				goto overlap_check;
+			}
+			/* Things are complicated: The new extent extends the
+			 * length but with a different mmap address;
+			 * Remove the original extent and insert the new one. */
+
+			rb_erase(&curr->node, &node->extent_tree);
+			rb_erase(&curr->mmap_node, &node->mmap_extent_tree);
+			free(curr);
+			node->num_extents--;
+			goto retry;
 		}
 	}
-
-	if (no_new)
-		return;
 
 	new = malloc(sizeof(struct extent_cache_entry));
 	if (!new)
@@ -196,23 +216,6 @@ void add_extent(struct NVFile *nvf, off_t offset, size_t length, int write,
 	rb_link_node(&new->node, parent, temp);
 	rb_insert_color(&new->node, &node->extent_tree);
 
-	next_node = rb_next(&new->node);
-	if (!next_node)
-		goto mmap_tree;
-
-	next = container_of(next_node, struct extent_cache_entry, node);
-	if (new->offset + new->count > next->offset) {
-		ERROR("%s: insert extent overlaps "
-			"with existing extent: insert offset 0x%lx, "
-			"length %lu, mmap_addr 0x%lx, existing offset "
-			"0x%lx, length %lu, mmap_addr 0x%lx\n",
-			__func__, extent_offset, extent_length,
-			extent_mmap_addr, next->offset, next->count,
-			next->mmap_addr);
-		new->count = next->offset - new->offset;
-	}
-
-mmap_tree:
 	/*
 	 * Now insert to the mmap rbtree.
 	 * If find the existing mmap_addr but not the same offset,
@@ -281,76 +284,40 @@ mmap_tree:
 
 	node->num_extents++;
 
-	/* The new inserted extent may overlap with next extent */
-	next_node = rb_next(&new->mmap_node);
-	while (next_node) {
-		next = container_of(next_node, struct extent_cache_entry,
-					mmap_node);
-		if (new->mmap_addr + new->count > next->mmap_addr) {
-			DEBUG("%s: insert extent mmapp region overlaps "
+overlap_check:
+	next_node = rb_next(&new->node);
+	if (next_node) {
+		next = container_of(next_node,
+				struct extent_cache_entry, node);
+		if (new->offset + new->count > next->offset) {
+			ERROR("%s: insert extent overlaps "
 				"with existing extent: insert offset 0x%lx, "
 				"length %lu, mmap_addr 0x%lx, existing offset "
 				"0x%lx, length %lu, mmap_addr 0x%lx\n",
 				__func__, extent_offset, extent_length,
 				extent_mmap_addr, next->offset, next->count,
 				next->mmap_addr);
-			rb_erase(&next->node, &node->extent_tree);
-			rb_erase(&next->mmap_node, &node->mmap_extent_tree);
-			free(next);
-			node->num_extents--;
-			next_node = rb_next(&new->mmap_node);
-		} else {
-			break;
+			new->count = next->offset - new->offset;
+		}
+	}
+
+	next_node = rb_next(&new->mmap_node);
+	if (next_node) {
+		next = container_of(next_node,
+				struct extent_cache_entry, mmap_node);
+		if (new->mmap_addr + new->count > next->mmap_addr) {
+			ERROR("%s: insert extent mmap overlaps "
+				"with existing extent: insert offset 0x%lx, "
+				"length %lu, mmap_addr 0x%lx, existing offset "
+				"0x%lx, length %lu, mmap_addr 0x%lx\n",
+				__func__, extent_offset, extent_length,
+				extent_mmap_addr, next->offset, next->count,
+				next->mmap_addr);
+			new->count = next->mmap_addr - new->mmap_addr;
 		}
 	}
 
 	return;
-
-#if 0
-	prenode = TreePredecessor(tree, newnode);
-	if (prenode != tree->nil) {
-		struct extent_cache_entry *prev = prenode->key;
-		if ((prev->offset + prev->count >= new->offset) &&
-		    (prev->mmap_addr + (new->offset - prev->offset) == new->mmap_addr)) {
-			if (prev->offset + prev->count
-					< new->offset + new->count) {
-				prev->count = new->offset + new->count
-						- prev->offset;
-			}
-
-			RBDelete(tree, newnode);
-
-			newnode = prenode;
-			new = newnode->key;
-			if (write)
-				new->dirty = write;
-		}
-	}
-
-	/* Loop because the new extent might cover several existing extents */
-	while (1) {
-		rb_red_blk_node *sucnode = TreeSuccessor(tree, newnode);
-		if (sucnode != tree->nil) {
-			struct extent_cache_entry *next = sucnode->key;
-			if ((new->offset + new->count >= next->offset) &&
-		 	    (new->mmap_addr + (next->offset - new->offset) == next->mmap_addr)) {
-				if (next->offset + next->count
-						> new->offset + new->count) {
-					new->count = next->offset + next->count
-							- new->offset;
-				}
-
-				if (next->dirty)
-					new->dirty = next->dirty;
-				RBDelete(tree, sucnode);
-			} else {
-				break;
-			}
-		} else {
-			break;
-		}
-	}
-#endif
 }
 
 void remove_extent(struct NVFile *nvf, off_t offset)

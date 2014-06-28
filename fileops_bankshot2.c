@@ -672,8 +672,8 @@ struct NVNode * bankshot2_get_node(const char *path, struct stat *file_st)
 	for (i = 0; i < OPEN_MAX; i++)
 	{
 		if(_bankshot2_node_lookup[i].serialno == file_st->st_ino) {
-			DEBUG("File %s is (or was) already open in fd %i "
-				"(this fd hasn't been __open'ed yet)! "
+			DEBUG("File %s is (or was) already open in node %i "
+				"(this node hasn't been __open'ed yet)! "
 				"Sharing nodes.\n", path, i);
 			node = &_bankshot2_node_lookup[i];
 			break;
@@ -1495,6 +1495,19 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				data.required);
 			add_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.write, data.mmap_addr);
+			if (data.mmap_offset + data.mmap_length < offset ||
+				offset + request_len <= data.mmap_offset)
+				MSG("Add extent not overlap: cache fd %llu, "
+					"mmap offset 0x%llx, mmap_addr 0x%llx, "
+					"length %llu, required %lu, "
+					"offset 0x%lx, size %lu, extent offset "
+					"0x%lx, extent length %lu, "
+					"file length 0x%lx\n",
+					nvf->cache_serialno, data.mmap_offset,
+					data.mmap_addr,	data.mmap_length,
+					data.required, offset, request_len,
+					data.extent_start_file_offset,
+					data.extent_length, data.file_length);
 			integrity_test_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.mmap_addr);
 			if (!wr_lock) {
@@ -1742,6 +1755,7 @@ update_length:
 
 	}
 	// nvf->offset += len_to_read; // NOT IN PREAD (this happens in read)
+	bankshot2_update_file_length(nvf, file_length);
 
 	DO_MSYNC(nvf);
 
@@ -1815,7 +1829,6 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 
 	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->length, offset, extension, count);
 
-#if 0
 	if(extension > 0)
 	{
 		#if COUNT_EXTENDS
@@ -1825,8 +1838,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
 			count, nvf->node->length, offset, count, extension);
 		
-		DEBUG("Done extending map(s), now let's exend the file with PWRITE ");
-
+#if 0
 		ssize_t temp_result;
 		if(nvf->aligned) {
 			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _bankshot2_fileops->name, nvf->fd, _bankshot2_zbuf, 512, count+offset-512);
@@ -1845,14 +1857,19 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			PRINT_ERROR_NAME(errno);
 			assert(0);
 		}
-
+#endif
+		posix_write = _bankshot2_fileops->PWRITE(file, buf,
+					count, offset);
+		if (offset + posix_write > file_length) {
+			bankshot2_update_file_length(nvf, offset + posix_write);
+		}
 		DEBUG("Done extending NVFile.\n");
+		goto out;
 	}
 	else
 	{
 		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->length);
 	}
-#endif
 
 	SANITYCHECK(nvf->valid);
 	SANITYCHECK(nvf->node != NULL);
@@ -1975,6 +1992,8 @@ update_length:
 		buf += extent_length;
 	}
 	DO_MSYNC(nvf);
+
+out:
 	DEBUG("_bankshot2_do_pwrite returned %lu\n", count);
 	BANKSHOT2_END_TIMING(write_t, write_time);
 
