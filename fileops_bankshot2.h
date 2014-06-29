@@ -93,6 +93,12 @@ struct NVNode
 //	volatile int valid; // for debugging purposes
 	volatile size_t cache_length;
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
+	unsigned long num_reads;
+	unsigned long num_writes;
+	unsigned long long memcpy_read;
+	unsigned long long memcpy_write;
+	unsigned long long total_read;
+	unsigned long long total_write;
 };
 
 struct extent_cache_entry

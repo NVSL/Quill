@@ -469,18 +469,19 @@ void _bankshot2_init2(void)
 	_bankshot2_fd_lookup = (struct NVFile *)
 				calloc(OPEN_MAX, sizeof(struct NVFile));
 
+	memset(_bankshot2_fd_lookup, 0, OPEN_MAX * sizeof(struct NVFile));
+
 	int i;
 	for(i = 0; i < OPEN_MAX; i++) {
-		_bankshot2_fd_lookup[i].valid = 0;
 		NVP_LOCK_INIT(_bankshot2_fd_lookup[i].lock);
 	}
 
 	_bankshot2_node_lookup = (struct NVNode *)
 				calloc(OPEN_MAX, sizeof(struct NVNode));
 
+	memset(_bankshot2_node_lookup, 0, OPEN_MAX * sizeof(struct NVNode));
+
 	for(i = 0; i < OPEN_MAX; i++) {
-		_bankshot2_node_lookup[i].reference = 0;
-		_bankshot2_node_lookup[i].num_extents = 0;
 		NVP_LOCK_INIT(_bankshot2_node_lookup[i].lock);
 	}
 
@@ -623,11 +624,31 @@ void bankshot2_clear_mappings(void)
 	free(_bankshot2_node_lookup);
 }
 
+void bankshot2_print_io_stats(void)
+{
+	struct NVNode *node = NULL;
+	int i;
+
+	for (i = 0; i < OPEN_MAX; i++) {
+		node = &_bankshot2_node_lookup[i];
+		if (node->num_reads)
+			MSG("Node %d, cache fd %llu: reads %lu, "
+				"memcpy read %llu, total read %llu;\n",
+				i, node->cache_serialno, node->num_reads,
+				node->memcpy_read, node->total_read);
+		if (node->num_writes)
+			MSG("Node %d, cache fd %llu: writes %lu, "
+				"memcpy write %llu, total write %llu\n",
+				i, node->cache_serialno, node->num_writes,
+				node->memcpy_write, node->total_write);
+	}
+}
+
 void bankshot2_exit_handler(void)
 {
-	bankshot2_clear_mappings();
-
 	bankshot2_print_time_stats();
+	bankshot2_print_io_stats();
+	bankshot2_clear_mappings();
 }
 
 struct NVNode * bankshot2_allocate_node(void)
@@ -1665,7 +1686,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 		case 0:	// It's cached. Do memcpy.
 			break;
 		case 1:	// We have some big troubles.
-			return read_count;
+			goto out;
 		case 2:
 		case 4: // File hole, return zeros.
 			if (extent_length > len_to_read)
@@ -1686,7 +1707,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 						read_offset + posix_read);
 
 				read_count += posix_read;
-				return read_count;
+				goto out;
 			}
 			break;
 		case 5: // Done by kernel.
@@ -1721,6 +1742,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 				BANKSHOT2_START_TIMING(memcpyr_t, memcpy_time);
 				memcpy1(buf, (char *)mmap_addr, extent_length);
 				BANKSHOT2_END_TIMING(memcpyr_t, memcpy_time);
+				nvf->node->memcpy_read += extent_length;
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
@@ -1757,10 +1779,14 @@ update_length:
 	// nvf->offset += len_to_read; // NOT IN PREAD (this happens in read)
 	bankshot2_update_file_length(nvf, file_length);
 
+out:
 	DO_MSYNC(nvf);
 
 	DEBUG("Return read_count %lu\n", read_count);
 	BANKSHOT2_END_TIMING(read_t, read_time);
+
+	nvf->node->num_reads++;
+	nvf->node->total_read += read_count;
 
 	return read_count;
 }
@@ -1864,6 +1890,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			bankshot2_update_file_length(nvf, offset + posix_write);
 		}
 		DEBUG("Done extending NVFile.\n");
+		write_count = posix_write;
 		goto out;
 	}
 	else
@@ -1893,7 +1920,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		case 0:	// It's cached. Do memcpy.
 			break;
 		case 1:	// We have some big troubles.
-			return write_count;
+			goto out;
 		case 2:
 		case 4: // File hole, return zeros.
 			if (extent_length > len_to_write)
@@ -1924,7 +1951,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 					bankshot2_update_file_length(nvf, write_offset + posix_write);
 
 				write_count += posix_write;
-				return write_count;
+				goto out;
 			}
 			break;
 		case 5: // Done by kernel.
@@ -1957,6 +1984,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 				BANKSHOT2_START_TIMING(memcpyw_t, memcpy_time);
 				FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
 				BANKSHOT2_END_TIMING(memcpyw_t, memcpy_time);
+				nvf->node->memcpy_write += extent_length;
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
@@ -1994,10 +2022,13 @@ update_length:
 	DO_MSYNC(nvf);
 
 out:
-	DEBUG("_bankshot2_do_pwrite returned %lu\n", count);
+	DEBUG("_bankshot2_do_pwrite returned %lu\n", write_count);
 	BANKSHOT2_END_TIMING(write_t, write_time);
 
-	return count;
+	nvf->node->num_writes++;
+	nvf->node->total_write += write_count;
+
+	return write_count;
 }
 
 RETT_SEEK _bankshot2_SEEK(INTF_SEEK)
