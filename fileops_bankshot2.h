@@ -105,6 +105,10 @@ struct NVNode
 	unsigned long long total_write;
 	unsigned long long total_read_mmap;
 	unsigned long long total_write_mmap;
+	unsigned long long total_read_actual;
+	unsigned long long total_write_actual;
+	unsigned long long total_read_required;
+	unsigned long long total_write_required;
 };
 
 struct extent_cache_entry
