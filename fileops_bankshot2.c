@@ -641,6 +641,16 @@ void bankshot2_print_io_stats(void)
 				"memcpy write %llu, total write %llu\n",
 				i, node->cache_serialno, node->num_writes,
 				node->memcpy_write, node->total_write);
+		if (node->num_read_kernels)
+			MSG("Node %d, cache fd %llu: READ: kernel count %lu, "
+				"mmap count %llu, total mmap length %llu;\n",
+				i, node->cache_serialno, node->num_read_kernels,
+				node->num_read_mmaps, node->total_read_mmap);
+		if (node->num_write_kernels)
+			MSG("Node %d, cache fd %llu: WRITE: kernel count %lu, "
+				"mmap count %llu, total mmap length %llu;\n",
+				i, node->cache_serialno, node->num_write_kernels,
+				node->num_write_mmaps, node->total_write_mmap);
 	}
 }
 
@@ -1497,6 +1507,11 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	ret = copy_to_cache(nvf, &data);
 	BANKSHOT2_END_TIMING(kernel_t, kernel_time);
 
+	if (rnw == READ_EXTENT)
+		nvf->node->num_read_kernels++;
+	else
+		nvf->node->num_write_kernels++;
+
 	DEBUG("copy_to_cache return %d, offset %llu, start %llu, length %llu\n",
 		ret, data.extent_start_file_offset, data.extent_start,
 		data.extent_length);
@@ -1536,6 +1551,14 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				NVP_LOCK_NODE_RD(nvf, cpuid);
 			}
 			BANKSHOT2_END_TIMING(insert_t, insert_time);
+
+			if (rnw == READ_EXTENT) {
+				nvf->node->num_read_mmaps++;
+				nvf->node->total_read_mmap += data.mmap_length;
+		 	} else {
+				nvf->node->num_write_mmaps++;
+				nvf->node->total_write_mmap += data.mmap_length;
+			}
 		}
 		bankshot2_update_file_length(nvf, data.file_length);
 		ret = 5;
