@@ -95,6 +95,7 @@ struct NVNode
 	ino_t cache_serialno; // duplicated so that iterating doesn't require following every node*
 	unsigned long num_reads;
 	unsigned long num_writes;
+	unsigned long num_posix_writes;
 	unsigned long num_read_kernels;
 	unsigned long num_write_kernels;
 	unsigned long num_read_mmaps;

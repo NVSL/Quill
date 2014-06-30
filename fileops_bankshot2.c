@@ -637,10 +637,12 @@ void bankshot2_print_io_stats(void)
 				i, node->cache_serialno, node->num_reads,
 				node->memcpy_read, node->total_read);
 		if (node->num_writes)
-			MSG("Node %d, cache fd %llu: writes %lu, "
+			MSG("Node %d, cache fd %llu: "
+				"writes %lu, posix_writes %lu, "
 				"memcpy write %llu, total write %llu\n",
 				i, node->cache_serialno, node->num_writes,
-				node->memcpy_write, node->total_write);
+				node->num_posix_writes, node->memcpy_write,
+				node->total_write);
 		if (node->num_read_kernels)
 			MSG("Node %d, cache fd %llu: READ: kernel count %lu, "
 				"mmap count %llu, total mmap length %llu, "
@@ -965,6 +967,14 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		nvf->posix = 1;
 		MSG("A Posix Path: %s\n", path);
 	}
+
+#if 0
+	if (path[29] == 'l' && path[30] == 'o'
+			&& path[31] == 'g' && path[32] == '.') {
+		nvf->posix = 1;
+		MSG("A Posix Path: %s\n", path);
+	}
+#endif
 
 	if ((nvf->posix == 0) && (_bankshot2_get_cache_inode(path, oflag,
 						mode, nvf) < 0)) {
@@ -1928,6 +1938,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		}
 		DEBUG("Done extending NVFile.\n");
 		write_count = posix_write;
+		nvf->node->num_posix_writes++;
 		goto out;
 	}
 	else
@@ -1988,6 +1999,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 					bankshot2_update_file_length(nvf, write_offset + posix_write);
 
 				write_count += posix_write;
+				nvf->node->num_posix_writes++;
 				goto out;
 			}
 			break;
