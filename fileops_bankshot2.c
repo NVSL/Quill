@@ -1482,6 +1482,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 				int wr_lock, int cpuid)
 {
 	int ret, feret;
+	void *carrier;
 	off_t cached_extent_offset;
 	size_t cached_extent_length;
 	struct bankshot2_cache_data data;
@@ -1513,6 +1514,10 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	data.file_length = *file_length;
 	data.size = request_len;
 	data.buf = buf;
+	posix_memalign(&carrier, PAGE_SIZE, MAX_MMAP_SIZE);
+	if (!carrier)
+		assert(0);
+	data.carrier = (char *)carrier;
 	data.cache_ino = nvf->cache_serialno;
 	data.rnw = rnw;
 	data.read = (data.rnw == READ_EXTENT);
@@ -1535,6 +1540,8 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	DEBUG("copy_to_cache return %d, offset %llu, start %llu, length %llu\n",
 		ret, data.extent_start_file_offset, data.extent_start,
 		data.extent_length);
+
+	free(data.carrier);
 
 	if (ret == 0) {
 		if (data.mmap_length) {
