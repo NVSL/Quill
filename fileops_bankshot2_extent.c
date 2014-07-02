@@ -176,7 +176,7 @@ retry:
 				return;
 			}
 			if (extent_length <= curr->count) {
-				MSG("%s: Found match existing extent: "
+				DEBUG("%s: Found match existing extent: "
 					"offset 0x%lx, length %lu, "
 					"mmap_addr 0x%lx, "
 					"existing offset 0x%lx, length %lu, "
