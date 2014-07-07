@@ -1518,6 +1518,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	if (!carrier)
 		assert(0);
 	data.carrier = (char *)carrier;
+	data.extent = malloc(sizeof(struct fiemap_extent));
 	data.cache_ino = nvf->cache_serialno;
 	data.rnw = rnw;
 	data.read = (data.rnw == READ_EXTENT);
@@ -1542,6 +1543,7 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		data.extent_length);
 
 	free(data.carrier);
+	free(data.extent);
 
 	if (ret == 0) {
 		if (data.mmap_length) {

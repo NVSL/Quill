@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <linux/fiemap.h>
 #include <pthread.h>
 #include <signal.h>
 #include <setjmp.h>
