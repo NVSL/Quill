@@ -15,7 +15,6 @@ struct timezone;
 struct timeval;
 int gettimeofday(struct timeval *tv, struct timezone *tz);
 
-char *cache_path;
 const char *bankshot2_ctrl_dev = "/dev/bankshot2Ctrl0";
 int bankshot2_ctrl_fd;
 
@@ -64,6 +63,7 @@ struct NVNode* _bankshot2_node_lookup;
 void _bankshot2_init2(void);
 //int _bankshot2_extend_map(struct NVFile *nvf, size_t newlen);
 void _bankshot2_SIGBUS_handler(int sig);
+void _bankshot2_SIGINT_handler(int sig);
 void _bankshot2_SIGSEGV_handler(int sig);
 void cache_write_back(struct NVFile *nvf);
 
@@ -497,6 +497,9 @@ void _bankshot2_init2(void)
 
 	DEBUG("Installing SIGBUS handler.\n");
 	signal(SIGBUS, _bankshot2_SIGBUS_handler);
+
+	DEBUG("Installing SIGINT handler.\n");
+	signal(SIGINT, _bankshot2_SIGINT_handler);
 
 	bankshot2_setup_signal_handler();
 	//TODO
@@ -2723,6 +2726,13 @@ void _bankshot2_SIGBUS_handler(int sig)
 	#endif
 //	_bankshot2_debug_handoff();
 	assert(0);
+}
+
+void _bankshot2_SIGINT_handler(int sig)
+{
+	MSG("Caught SIGINT signal! Print cache stats and exit.\n");
+	bankshot2_print_time_stats();
+	bankshot2_print_io_stats();
 }
 
 void _bankshot2_SIGSEGV_handler(int sig)
