@@ -87,8 +87,8 @@ int _bankshot2_write_pwrite_lock_handoff;
 static sigjmp_buf pread_jumper;
 static sigjmp_buf pwrite_jumper;
 
-static int do_pread_memcpy;
-static int do_pwrite_memcpy;
+volatile static int do_pread_memcpy;
+volatile static int do_pwrite_memcpy;
 
 //void * mremap(void *old_address, size_t old_size, size_t new_size, int flags);
 
@@ -1515,15 +1515,6 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		return 0;
 	}
 
-	/* Need to go to kernel. Use mutex instead of spinlock. */
-	if (!wr_lock) {
-		NVP_UNLOCK_NODE_RD(nvf, cpuid);
-	} else {
-		NVP_UNLOCK_NODE_WR(nvf);
-	}
-
-	pthread_mutex_lock(&nvf->node->mutex);
-
 	memset(&data, 0, sizeof(struct bankshot2_cache_data));
 	data.file = nvf->fd;
 	data.offset = offset;
@@ -1545,9 +1536,26 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		data.file, data.cache_ino, data.offset, data.size,
 		data.file_length);
 
+	/* Need to go to kernel. Release spinlock and acquire mutex. */
+	if (!wr_lock) {
+		NVP_UNLOCK_NODE_RD(nvf, cpuid);
+	} else {
+		NVP_UNLOCK_NODE_WR(nvf);
+	}
+
+	pthread_mutex_lock(&nvf->node->mutex);
+
 	BANKSHOT2_START_TIMING(kernel_t, kernel_time);
 	ret = copy_to_cache(nvf, &data);
 	BANKSHOT2_END_TIMING(kernel_t, kernel_time);
+
+	pthread_mutex_unlock(&nvf->node->mutex);
+
+	if (!wr_lock) {
+		NVP_LOCK_NODE_RD(nvf, cpuid);
+	} else {
+		NVP_LOCK_NODE_WR(nvf);
+	}
 
 	if (rnw == READ_EXTENT)
 		nvf->node->num_read_kernels++;
@@ -1564,6 +1572,10 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	if (ret == 0) {
 		if (data.mmap_length) {
 			// Acquire node write lock for add_extent
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_RD(nvf, cpuid);
+				NVP_LOCK_NODE_WR(nvf);
+			}
 			BANKSHOT2_START_TIMING(insert_t, insert_time);
 			DEBUG("Add extent: cache fd %llu, start offset 0x%llx, "
 				"mmap_addr 0x%llx, length %llu, required %lu\n",
@@ -1588,7 +1600,10 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 			integrity_test_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.mmap_addr);
 			BANKSHOT2_END_TIMING(insert_t, insert_time);
-
+			if (!wr_lock) {
+				NVP_UNLOCK_NODE_WR(nvf);
+				NVP_LOCK_NODE_RD(nvf, cpuid);
+			}
 			if (rnw == READ_EXTENT) {
 				nvf->node->num_read_mmaps++;
 				nvf->node->total_read_mmap += data.mmap_length;
@@ -1657,13 +1672,6 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		assert(0);
 	}
 out:
-	pthread_mutex_unlock(&nvf->node->mutex);
-	if (!wr_lock) {
-		NVP_LOCK_NODE_RD(nvf, cpuid);
-	} else {
-		NVP_LOCK_NODE_WR(nvf);
-	}
-
 	return ret;
 }
 
@@ -1755,11 +1763,8 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 		DEBUG("Pread: looking for extent offset %d, size %d\n",
 			read_offset, len_to_read);
 		file_length = len_to_read;
-//		clock_gettime(CLOCK_MONOTONIC, &start);
 		ret = bankshot2_get_extent(nvf, read_offset, &extent_length,
 			&mmap_addr, &file_length, READ_EXTENT, buf, 0, cpuid);
-//		clock_gettime(CLOCK_MONOTONIC, &end);
-//		printf("get extent time: %lu\n", end.tv_nsec - start.tv_nsec);
 		DEBUG("Pread: get_extent returned %d, length %llu\n",
 			ret, extent_length);
 
@@ -1772,7 +1777,8 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 		case 4: // File hole, return zeros.
 			if (extent_length > len_to_read)
 				extent_length = len_to_read;
-			DEBUG("File hole. fill with memset. Offset: %.16llx, len: %llu\n",
+			DEBUG("File hole. fill with memset. Offset: "
+					"%.16llx, len: %llu\n",
 					read_offset, extent_length);
 			memset(buf, 0, extent_length);
 			goto update_length;
@@ -1827,8 +1833,10 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
-			MSG("Pread caught seg fault. Remove extent 0x%llx "
-				"and try again.\n", read_offset);
+			MSG("Pread caught seg fault: fd %d, cache fd %llu. "
+				"Remove extent 0x%llx and try again.\n",
+				nvf->fd, nvf->node->cache_serialno,
+				read_offset);
 			nvf->node->num_read_segfaults++;
 			NVP_UNLOCK_NODE_RD(nvf, cpuid);
 			NVP_LOCK_NODE_WR(nvf);
@@ -1883,7 +1891,6 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	size_t posix_write;
 	unsigned long mmap_addr = 0;
 	size_t file_length;
-	char *new_buf;
 	timing_type write_time, memcpy_time;
 
 	BANKSHOT2_START_TIMING(write_t, write_time);
@@ -1991,14 +1998,16 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	/* If request extent not in cache, we need to write to cache and add extent */
 	write_count = 0;
 	write_offset = offset;
-	new_buf = (char *)buf;
 
 	while(len_to_write > 0) {
-		DEBUG("Pwrite: looking for extent offset %d, size %d\n", write_offset, len_to_write);
+		DEBUG("Pwrite: looking for extent offset %d, size %d\n",
+				write_offset, len_to_write);
 		file_length = len_to_write;
-		ret = bankshot2_get_extent(nvf, write_offset, &extent_length, &mmap_addr,
-						&file_length, WRITE_EXTENT, new_buf, wr_lock, cpuid);
-		DEBUG("Pwrite: get_extent returned %d, length %llu\n", ret, extent_length);
+		ret = bankshot2_get_extent(nvf, write_offset, &extent_length,
+				&mmap_addr, &file_length, WRITE_EXTENT, (char *)buf,
+				wr_lock, cpuid);
+		DEBUG("Pwrite: get_extent returned %d, length %llu\n",
+				ret, extent_length);
 		switch (ret) {
 		case 0:	// It's cached. Do memcpy.
 			break;
@@ -2008,7 +2017,8 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		case 4: // File hole, return zeros.
 			if (extent_length > len_to_write)
 				extent_length = len_to_write;
-			DEBUG("File hole. fill with posix write. Offset: %.16llx, len: %llu\n",
+			DEBUG("File hole. fill with posix write. Offset: "
+					"%.16llx, len: %llu\n",
 					write_offset, extent_length);
 			posix_write = _bankshot2_fileops->PWRITE(file, buf,
 					extent_length, write_offset);
@@ -2028,8 +2038,8 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			if (write_offset + len_to_write > file_length) {
 				DEBUG("Near file end. Extending file\n");
 
-				posix_write = _bankshot2_fileops->PWRITE(file, buf,
-						len_to_write, write_offset);
+				posix_write = _bankshot2_fileops->PWRITE(file,
+					buf, len_to_write, write_offset);
 				if (write_offset + posix_write > file_length)
 					bankshot2_update_file_length(nvf, write_offset + posix_write);
 
@@ -2046,8 +2056,8 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			break;
 		}
 
-		DEBUG("Pwrite: get extent return: mmap_addr %llx, length %llu\n",
-					mmap_addr, extent_length);
+		DEBUG("Pwrite: get extent return: mmap_addr %llx, "
+			"length %llu\n", mmap_addr, extent_length);
 
 		if (extent_length > len_to_write)
 			extent_length = len_to_write;
@@ -2072,8 +2082,10 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
-			MSG("Pwrite caught seg fault. Remove extent 0x%llx "
-				"and try again.\n", write_offset);
+			MSG("Pwrite caught seg fault: fd %d, cache fd %llu. "
+				"Remove extent 0x%llx and try again.\n",
+				nvf->fd, nvf->node->cache_serialno,
+				write_offset);
 			nvf->node->num_write_segfaults++;
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_RD(nvf, cpuid);
