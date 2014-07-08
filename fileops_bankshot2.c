@@ -1483,42 +1483,43 @@ inline void bankshot2_update_file_length(struct NVFile *nvf, size_t file_length)
  * Locates an extent in the file which contains the given offset
  * nvf and node read lock must be held
  */
-int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
-				size_t *extent_length, unsigned long *mmap_addr,
-				size_t *file_length, int rnw, char *buf,
-				int wr_lock, int cpuid)
+int bankshot2_get_extent(struct NVFile *nvf,
+		struct bankshot2_extent_info *extent_info, int rnw, char *buf,
+		int wr_lock, int cpuid)
 {
 	int ret, feret;
 	void *carrier;
 	off_t cached_extent_offset;
+	off_t offset = extent_info->offset;
 	size_t cached_extent_length;
 	struct bankshot2_cache_data data;
-	size_t request_len = *file_length;
+	size_t request_len = extent_info->request_len;
 	timing_type lookup_time, kernel_time, insert_time;
-	
 	unsigned long cached_extent_start;
 
-	cached_extent_offset = offset;
+	cached_extent_offset = extent_info->offset;
 
 	BANKSHOT2_START_TIMING(lookup_t, lookup_time);
 	feret = find_extent(nvf, &cached_extent_offset, &cached_extent_length,
 					&cached_extent_start);
 	BANKSHOT2_END_TIMING(lookup_t, lookup_time);
 
-	*file_length = nvf->node->length;
+	extent_info->file_length = nvf->node->length;
 
 	if (feret == 1) {
-		*mmap_addr = cached_extent_start +
+		extent_info->mmap_addr = cached_extent_start +
 				(offset - cached_extent_offset);
-		*extent_length = cached_extent_length -
+		extent_info->extent_length = cached_extent_length -
 				(offset - cached_extent_offset);
+		extent_info->mmap_offset = cached_extent_offset;
+		extent_info->mmap_length = cached_extent_length;
 		return 0;
 	}
 
 	memset(&data, 0, sizeof(struct bankshot2_cache_data));
 	data.file = nvf->fd;
 	data.offset = offset;
-	data.file_length = *file_length;
+	data.file_length = extent_info->file_length;
 	data.size = request_len;
 	data.buf = buf;
 	posix_memalign(&carrier, PAGE_SIZE, MAX_MMAP_SIZE);
@@ -1626,20 +1627,20 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 		if ((data.extent_start == (uint64_t)(-512)
 				&& data.extent_length == (uint64_t)(-512))
 				|| data.file_length == 0) {
-			*file_length = data.file_length;
+			extent_info->file_length = data.file_length;
 			DEBUG("Found EOF\n");
 			ret = 3;
 			goto out;
 		} else if (data.extent_start == (uint64_t)(-512)) {
-			*extent_length = data.extent_length -
+			extent_info->extent_length = data.extent_length -
 				(data.extent_start_file_offset - offset);
-			*file_length = data.file_length;
+			extent_info->file_length = data.file_length;
 			DEBUG("Found Hole @ EOF\n");
 			ret = 4;
 			goto out;
 		} else if (data.extent_start_file_offset > offset) {
-			*extent_length = data.extent_start_file_offset - offset;
-			*file_length = data.file_length;
+			extent_info->extent_length = data.extent_start_file_offset - offset;
+			extent_info->file_length = data.file_length;
 			DEBUG("Found Hole\n");
 			ret = 2;
 			goto out;
@@ -1650,12 +1651,12 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 	}
 
 //	*mmap_addr = data.mmap_addr + (offset - data.mmap_offset);
-	*extent_length = data.actual_length - (offset - data.actual_offset);
+	extent_info->extent_length = data.actual_length - (offset - data.actual_offset);
 	/* Check if the actual transferred extent covers the required extent */
 	DEBUG("Transferred extent: require offset %llu, actual_offset %llu, "
 		"actual_length %llu, extent length %llu\n",
 		offset, data.actual_offset, data.actual_length,
-		*extent_length);
+		extent_info->extent_length);
 	if ((data.actual_offset > offset) || (data.actual_length +
 			data.actual_offset) <= offset) {
 		ERROR("Transferred extent does not cover request extent:\n"
@@ -1665,9 +1666,12 @@ int bankshot2_get_extent(struct NVFile *nvf, off_t offset,
 			data.actual_offset, data.actual_length);
 	}
 
-	*file_length = data.file_length;
+	extent_info->file_length = data.file_length;
+	extent_info->mmap_offset = data.mmap_offset;
+	extent_info->mmap_length = data.mmap_length;
+	extent_info->mmap_addr   = data.mmap_addr;
 
-	if (*extent_length <= 0) {
+	if (extent_info->extent_length <= 0) {
 		ERROR("Return extent_length <= 0\n");
 		assert(0);
 	}
@@ -1679,6 +1683,7 @@ out:
 RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 {
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	struct bankshot2_extent_info extent_info;
 	SANITYCHECKNVF(nvf);
 	int ret = 0;
 	int segfault;
@@ -1762,9 +1767,16 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 	while(len_to_read > 0) {
 		DEBUG("Pread: looking for extent offset %d, size %d\n",
 			read_offset, len_to_read);
-		file_length = len_to_read;
-		ret = bankshot2_get_extent(nvf, read_offset, &extent_length,
-			&mmap_addr, &file_length, READ_EXTENT, buf, 0, cpuid);
+		extent_info.request_len = len_to_read;
+		extent_info.offset = read_offset;
+
+		ret = bankshot2_get_extent(nvf, &extent_info, READ_EXTENT,
+						buf, 0, cpuid);
+
+		extent_length = extent_info.extent_length;
+		mmap_addr = extent_info.mmap_addr;
+		file_length = extent_info.file_length;
+
 		DEBUG("Pread: get_extent returned %d, length %llu\n",
 			ret, extent_length);
 
@@ -1833,10 +1845,15 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
-			MSG("Pread caught seg fault: fd %d, cache fd %llu. "
-				"Remove extent 0x%llx and try again.\n",
+			MSG("Pread caught seg fault: fd %d, cache fd %llu, "
+				"Request offset 0x%lx, length %lu, "
+				"Remove extent 0x%llx, length %lu, "
+				"mmap addr 0x%llx and try again.\n",
 				nvf->fd, nvf->node->cache_serialno,
-				read_offset);
+				read_offset, extent_length,
+				extent_info.mmap_offset,
+				extent_info.mmap_length,
+				extent_info.mmap_addr);
 			nvf->node->num_read_segfaults++;
 			NVP_UNLOCK_NODE_RD(nvf, cpuid);
 			NVP_LOCK_NODE_WR(nvf);
@@ -1884,6 +1901,7 @@ out:
 
 RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 {
+	struct bankshot2_extent_info extent_info;
 	int ret = 0;
 	int segfault;
 	off_t write_offset;
@@ -2002,10 +2020,16 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	while(len_to_write > 0) {
 		DEBUG("Pwrite: looking for extent offset %d, size %d\n",
 				write_offset, len_to_write);
-		file_length = len_to_write;
-		ret = bankshot2_get_extent(nvf, write_offset, &extent_length,
-				&mmap_addr, &file_length, WRITE_EXTENT, (char *)buf,
-				wr_lock, cpuid);
+		extent_info.request_len = len_to_write;
+		extent_info.offset = write_offset;
+
+		ret = bankshot2_get_extent(nvf, &extent_info, WRITE_EXTENT,
+				(char *)buf, wr_lock, cpuid);
+
+		extent_length = extent_info.extent_length;
+		mmap_addr = extent_info.mmap_addr;
+		file_length = extent_info.file_length;
+
 		DEBUG("Pwrite: get_extent returned %d, length %llu\n",
 				ret, extent_length);
 		switch (ret) {
@@ -2082,10 +2106,15 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		} else if (segfault == 1) {
 			segfault = 0;
 			bankshot2_setup_signal_handler();
-			MSG("Pwrite caught seg fault: fd %d, cache fd %llu. "
-				"Remove extent 0x%llx and try again.\n",
+			MSG("Pwrite caught seg fault: fd %d, cache fd %llu, "
+				"Request offset 0x%lx, length %lu, "
+				"Remove extent 0x%llx, length %lu, "
+				"mmap addr 0x%llx and try again.\n",
 				nvf->fd, nvf->node->cache_serialno,
-				write_offset);
+				write_offset, extent_length,
+				extent_info.mmap_offset,
+				extent_info.mmap_length,
+				extent_info.mmap_addr);
 			nvf->node->num_write_segfaults++;
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_RD(nvf, cpuid);

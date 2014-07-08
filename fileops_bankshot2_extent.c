@@ -328,6 +328,7 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 	int compVal;
 	int removed = 0;
 
+	MSG("Remove extent offset 0x%lx\n", offset);
 	temp = node->extent_tree.rb_node;
 	while (temp) {
 		curr = container_of(temp, struct extent_cache_entry, node);
@@ -338,7 +339,7 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 		} else if (compVal == 1) {
 			temp = temp->rb_right;
 		} else {
-			MSG("Remove extent: start offset 0x%llx, "
+			MSG("Remove extent succeed: start offset 0x%llx, "
 				"mmap_addr 0x%llx, length %llu\n",
 				curr->offset, curr->mmap_addr,
 				curr->count);

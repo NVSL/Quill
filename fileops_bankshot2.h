@@ -128,6 +128,19 @@ struct extent_cache_entry
 //	struct extent_cache_entry *next;
 };
 
+struct bankshot2_extent_info
+{
+	// Input value
+	uint64_t offset; //file offset in bytes
+	size_t request_len;
+	// Output value
+	uint64_t mmap_offset; //Mmap offset, align to MMAP_SIZE
+	size_t mmap_length; //mmap length
+	size_t extent_length;
+	uint64_t file_length; //total file length in bytes
+	unsigned long mmap_addr; // returned mmap address
+};
+
 // declare and alias all the functions in ALLOPS
 BOOST_PP_SEQ_FOR_EACH(DECLARE_WITHOUT_ALIAS_FUNCTS_IWRAP, _bankshot2_, ALLOPS_WPAREN)
 
