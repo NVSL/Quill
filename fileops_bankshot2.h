@@ -11,6 +11,7 @@
 #include <linux/fiemap.h>
 #include <pthread.h>
 #include <signal.h>
+#include <pthread.h>
 #include <setjmp.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
@@ -87,6 +88,7 @@ struct NVNode
 	int num_extents;
 	ino_t serialno;
 	NVP_LOCK_DECL;
+	pthread_mutex_t mutex;
 	char* volatile data; // the pointer itself is volatile
 	volatile size_t length;
 	volatile size_t maplength;
