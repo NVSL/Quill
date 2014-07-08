@@ -637,16 +637,19 @@ void bankshot2_print_io_stats(void)
 		node = &_bankshot2_node_lookup[i];
 		if (node->num_reads)
 			MSG("Node %d, cache fd %llu: reads %lu, "
-				"memcpy read %llu, total read %llu;\n",
+				"memcpy read %llu, total read %llu, "
+				"read segfaults %lu;\n",
 				i, node->cache_serialno, node->num_reads,
-				node->memcpy_read, node->total_read);
+				node->memcpy_read, node->total_read,
+				node->num_read_segfaults);
 		if (node->num_writes)
 			MSG("Node %d, cache fd %llu: "
 				"writes %lu, posix_writes %lu, "
-				"memcpy write %llu, total write %llu\n",
+				"memcpy write %llu, total write %llu, "
+				"write segfaults %lu\n",
 				i, node->cache_serialno, node->num_writes,
 				node->num_posix_writes, node->memcpy_write,
-				node->total_write);
+				node->total_write, node->num_write_segfaults);
 		if (node->num_read_kernels)
 			MSG("Node %d, cache fd %llu: READ: kernel count %lu, "
 				"mmap count %llu, total mmap length %llu, "
@@ -1663,6 +1666,7 @@ out:
 
 	return ret;
 }
+
 /* Read lock of nvf and node are held */
 RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 {
@@ -1825,6 +1829,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 			bankshot2_setup_signal_handler();
 			MSG("Pread caught seg fault. Remove extent 0x%llx "
 				"and try again.\n", read_offset);
+			nvf->node->num_read_segfaults++;
 			NVP_UNLOCK_NODE_RD(nvf, cpuid);
 			NVP_LOCK_NODE_WR(nvf);
 			remove_extent(nvf, read_offset);
@@ -2069,6 +2074,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			bankshot2_setup_signal_handler();
 			MSG("Pwrite caught seg fault. Remove extent 0x%llx "
 				"and try again.\n", write_offset);
+			nvf->node->num_write_segfaults++;
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_RD(nvf, cpuid);
 				NVP_LOCK_NODE_WR(nvf);

@@ -103,6 +103,8 @@ struct NVNode
 	unsigned long num_write_kernels;
 	unsigned long num_read_mmaps;
 	unsigned long num_write_mmaps;
+	unsigned long num_read_segfaults;
+	unsigned long num_write_segfaults;
 	unsigned long long memcpy_read;
 	unsigned long long memcpy_write;
 	unsigned long long total_read;
