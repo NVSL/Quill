@@ -23,6 +23,11 @@ static inline int _nvp_get_cpuid(void)
 	return id;
 }
 
+static inline int return_zero(void)
+{
+	return 0;
+}
+
 #ifndef USE_PTHREAD_LOCK
 	#define	USE_PTHREAD_LOCK 0
 #endif
@@ -31,17 +36,23 @@ static inline int _nvp_get_cpuid(void)
 	#define	USE_SCHED_GETCPU 1
 #endif
 
-#if	USE_SCHED_GETCPU
+#if	USE_SINGLE_LOCK
+	#define	GET_CPUID	return_zero
+#elif	USE_SCHED_GETCPU
 	#define	GET_CPUID	sched_getcpu
 #else
 	#define	GET_CPUID	_nvp_get_cpuid
 #endif
 
+#if	USE_SINGLE_LOCK
+	#define NVP_NUM_LOCKS	2
+#else
+	#define NVP_NUM_LOCKS	16
+#endif
+
 // double the number of logical cores: each lock takes up half a cache line, so to
 // reduce contention we space them out across cache lines.
 #if	USE_PTHREAD_LOCK
-
-#define NVP_NUM_LOCKS	16
 
 #define NVP_LOCK_DECL pthread_rwlock_t lock[NVP_NUM_LOCKS]
 
@@ -108,8 +119,6 @@ static inline int _nvp_get_cpuid(void)
 	//	DEBUG("NVP_WR Unlocking %i\n", iter);
 
 #else
-
-#define NVP_NUM_LOCKS	16
 
 #define WR_HELD	(1 << 30)
 
