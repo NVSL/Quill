@@ -1958,6 +1958,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		offset = nvf->node->length;
 	}
 
+	file_length = nvf->node->length;
 	ssize_t extension = count + offset - (nvf->node->length) ;
 
 	DEBUG("time for a Pwrite. file length %li, offset %li, extension %li, count %li\n", nvf->node->length, offset, extension, count);
