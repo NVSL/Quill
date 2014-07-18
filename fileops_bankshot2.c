@@ -427,12 +427,11 @@ void bankshot2_print_time_stats(void)
 {
 	int i;
 
-	printf("======== Bankshot2 timing stats: =========\n");
+	printf("=========================== Bankshot2 timing stats: ==========================\n");
 	for (i = 0; i < TIMING_NUM; i++)
 		printf("%s: count %llu, timing %llu, average %llu\n",
 			Timingstring[i], Countstats[i], Timingstats[i],
 			Countstats[i] ? Timingstats[i] / Countstats[i] : 0);
-	printf("==========================================\n");
 }
 
 #else
@@ -446,10 +445,9 @@ void bankshot2_print_time_stats(void)
 {
 	int i;
 
-	printf("======== Bankshot2 timing stats: =========\n");
+	printf("=========================== Bankshot2 timing stats: ==========================\n");
 	for (i = 0; i < TIMING_NUM; i++)
 		printf("%s: count %llu\n", Timingstring[i], Countstats[i]);
-	printf("==========================================\n");
 }
 
 #endif
@@ -694,7 +692,7 @@ void bankshot2_print_io_stats(void)
 				node->total_write_required);
 	}
 
-	printf("============ Total IO stats: ============\n");
+	printf("================================ Total IO stats: ===============================\n");
 	printf("Total IO stats:\n");
 	printf("OPEN %u, CLOSE %u\n", num_total_open, num_total_close);
 	printf("READ: count %u, total size %llu, average %llu\n",
@@ -709,7 +707,6 @@ void bankshot2_print_io_stats(void)
 	printf("PWRITE: count %u, total size %llu, average %llu\n",
 		num_total_pwrite, total_pwrite_size,
 		num_total_pwrite ? total_pwrite_size / num_total_pwrite : 0);
-	printf("=========================================\n");
 }
 
 void bankshot2_exit_handler(void)
