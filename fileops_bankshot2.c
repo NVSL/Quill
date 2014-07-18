@@ -1580,13 +1580,13 @@ int bankshot2_get_extent(struct NVFile *nvf,
 		NVP_UNLOCK_NODE_WR(nvf);
 	}
 
+	BANKSHOT2_START_TIMING(kernel_t, kernel_time);
 	pthread_mutex_lock(&nvf->node->mutex);
 
-	BANKSHOT2_START_TIMING(kernel_t, kernel_time);
 	ret = copy_to_cache(nvf, &data);
-	BANKSHOT2_END_TIMING(kernel_t, kernel_time);
 
 	pthread_mutex_unlock(&nvf->node->mutex);
+	BANKSHOT2_END_TIMING(kernel_t, kernel_time);
 
 	if (!wr_lock) {
 		NVP_LOCK_NODE_RD(nvf, cpuid);
