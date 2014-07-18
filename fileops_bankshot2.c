@@ -376,29 +376,36 @@ void report_memcpy_usec(void) { printf("Total memcpy time: %llu cycles: %f secon
 
 /* ================= Timing ================= */
 
-#define TIMING_NUM	7	// Apply to sizeof timing_category
-
-unsigned long long Countstats[TIMING_NUM];
-unsigned long long Timingstats[TIMING_NUM];
-const char *Timingstring[TIMING_NUM] = 
-{
-	"read",
-	"write",
-	"memcpy_read",
-	"memcpy_write",
-	"Tree_lookup",
-	"Tree_insert",
-	"kernel",
-};
-
 enum timing_category {
-	read_t = 0,
-	write_t,
+	do_pread_t = 0,
+	do_pwrite_t,
 	memcpyr_t,
 	memcpyw_t,
 	lookup_t,
 	insert_t,
 	kernel_t,
+	read_t,
+	pread_t,
+	write_t,
+	pwrite_t,
+	TIMING_NUM,	// Last item
+};
+
+unsigned long long Countstats[TIMING_NUM];
+unsigned long long Timingstats[TIMING_NUM];
+const char *Timingstring[TIMING_NUM] = 
+{
+	"do_pread",
+	"do_pwrite",
+	"memcpy_read",
+	"memcpy_write",
+	"Tree_lookup",
+	"Tree_insert",
+	"kernel",
+	"READ",
+	"PREAD",
+	"WRITE",
+	"PWRITE",
 };
 
 typedef struct timespec timing_type;
@@ -1213,17 +1220,22 @@ RETT_READ _bankshot2_READ(INTF_READ)
 	DEBUG("_bankshot2_READ %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
-	
+	timing_type read_time;
+
+	BANKSHOT2_START_TIMING(read_t, read_time);
 	if (nvf->posix) {
 		DEBUG("Call posix READ for fd %d\n", nvf->fd);
+		BANKSHOT2_END_TIMING(read_t, read_time);
 		return _bankshot2_fileops->READ(CALL_READ);
 	}
 
 	int cpuid = GET_CPUID();
 
 	RETT_READ result = _bankshot2_check_read_size_valid(length);
-	if (result <= 0)
+	if (result <= 0) {
+		BANKSHOT2_END_TIMING(read_t, read_time);
 		return result;
+	}
 
 	NVP_LOCK_FD_RD(nvf, cpuid); // TODO
 	NVP_CHECK_NVF_VALID_WR(nvf);
@@ -1251,6 +1263,7 @@ RETT_READ _bankshot2_READ(INTF_READ)
 
 	bankshot2_read_check(nvf, result, CALL_READ);
 
+	BANKSHOT2_END_TIMING(read_t, read_time);
 	return result;
 }
 
@@ -1259,17 +1272,23 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 	DEBUG("_bankshot2_WRITE %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	timing_type write_time;
+
+	BANKSHOT2_START_TIMING(write_t, write_time);
 
 	if (nvf->posix) {
 		DEBUG("Call posix WRITE for fd %d\n", nvf->fd);
+		BANKSHOT2_END_TIMING(write_t, write_time);
 		return _bankshot2_fileops->WRITE(CALL_WRITE);
 	}
 
 	int cpuid = GET_CPUID();
 
 	RETT_WRITE result = _bankshot2_check_write_size_valid(length);
-	if (result <= 0)
+	if (result <= 0) {
+		BANKSHOT2_END_TIMING(write_t, write_time);
 		return result;
+	}
 
 	NVP_LOCK_FD_RD(nvf, cpuid); // TODO
 	NVP_CHECK_NVF_VALID_WR(nvf);
@@ -1307,6 +1326,7 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	bankshot2_write_check(CALL_WRITE);
+	BANKSHOT2_END_TIMING(write_t, write_time);
 
 	return result;
 }
@@ -1318,15 +1338,21 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 	DEBUG("_bankshot2_PREAD %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	timing_type pread_time;
+
+	BANKSHOT2_START_TIMING(pread_t, pread_time);
 
 	if (nvf->posix) {
 		DEBUG("Call posix PREAD for fd %d\n", nvf->fd);
+		BANKSHOT2_END_TIMING(pread_t, pread_time);
 		return _bankshot2_fileops->PREAD(CALL_PREAD);
 	}
 
 	RETT_PREAD result = _bankshot2_check_read_size_valid(count);
-	if (result <= 0)
+	if (result <= 0) {
+		BANKSHOT2_END_TIMING(pread_t, pread_time);
 		return result;
+	}
 
 	int cpuid = GET_CPUID();
 
@@ -1341,6 +1367,8 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 
 	bankshot2_pread_check(nvf, result, CALL_PREAD);
 
+	BANKSHOT2_END_TIMING(pread_t, pread_time);
+
 	return result;
 }
 
@@ -1351,15 +1379,21 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 	DEBUG("_bankshot2_PWRITE %d\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	timing_type pwrite_time;
+
+	BANKSHOT2_START_TIMING(pwrite_t, pwrite_time);
 
 	if (nvf->posix) {
 		DEBUG("Call posix PWRITE for fd %d\n", nvf->fd);
+		BANKSHOT2_END_TIMING(pwrite_t, pwrite_time);
 		return _bankshot2_fileops->PWRITE(CALL_PWRITE);
 	}
 
 	RETT_PWRITE result = _bankshot2_check_write_size_valid(count);
-	if (result <= 0)
+	if (result <= 0) {
+		BANKSHOT2_END_TIMING(pwrite_t, pwrite_time);
 		return result;
+	}
 	
 	int cpuid = GET_CPUID();
 
@@ -1386,6 +1420,8 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	bankshot2_pwrite_check(CALL_PWRITE);
+
+	BANKSHOT2_END_TIMING(pwrite_t, pwrite_time);
 
 	return result;
 }
@@ -1693,7 +1729,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 	unsigned long mmap_addr = 0;
 	timing_type read_time, memcpy_time;
 
-	BANKSHOT2_START_TIMING(read_t, read_time);
+	BANKSHOT2_START_TIMING(do_pread_t, read_time);
 	ssize_t available_length = (nvf->node->length) - offset;
 
 	if(UNLIKELY(!nvf->canRead)) {
@@ -1890,7 +1926,7 @@ out:
 	DO_MSYNC(nvf);
 
 	DEBUG("Return read_count %lu\n", read_count);
-	BANKSHOT2_END_TIMING(read_t, read_time);
+	BANKSHOT2_END_TIMING(do_pread_t, read_time);
 
 	nvf->node->num_reads++;
 	nvf->node->total_read += read_count;
@@ -1911,7 +1947,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	size_t file_length;
 	timing_type write_time, memcpy_time;
 
-	BANKSHOT2_START_TIMING(write_t, write_time);
+	BANKSHOT2_START_TIMING(do_pwrite_t, write_time);
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
@@ -2150,7 +2186,7 @@ update_length:
 
 out:
 	DEBUG("_bankshot2_do_pwrite returned %lu\n", write_count);
-	BANKSHOT2_END_TIMING(write_t, write_time);
+	BANKSHOT2_END_TIMING(do_pwrite_t, write_time);
 
 	nvf->node->num_writes++;
 	nvf->node->total_write += write_count;
