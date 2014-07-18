@@ -427,11 +427,12 @@ void bankshot2_print_time_stats(void)
 {
 	int i;
 
-	printf("Bankshot2 timing stats:\n");
+	printf("======== Bankshot2 timing stats: =========\n");
 	for (i = 0; i < TIMING_NUM; i++)
 		printf("%s: count %llu, timing %llu, average %llu\n",
 			Timingstring[i], Countstats[i], Timingstats[i],
 			Countstats[i] ? Timingstats[i] / Countstats[i] : 0);
+	printf("==========================================\n");
 }
 
 #else
@@ -445,12 +446,26 @@ void bankshot2_print_time_stats(void)
 {
 	int i;
 
-	printf("Bankshot2 timing stats:\n");
+	printf("======== Bankshot2 timing stats: =========\n");
 	for (i = 0; i < TIMING_NUM; i++)
 		printf("%s: count %llu\n", Timingstring[i], Countstats[i]);
+	printf("==========================================\n");
 }
 
 #endif
+
+/* ================= IO stats ================= */
+
+unsigned int num_total_open;
+unsigned int num_total_close;
+unsigned int num_total_read;
+unsigned int num_total_write;
+unsigned long long total_read_size;
+unsigned long long total_write_size;
+unsigned int num_total_pread;
+unsigned int num_total_pwrite;
+unsigned long long total_pread_size;
+unsigned long long total_pwrite_size;
 
 void bankshot2_exit_handler(void);
 
@@ -678,6 +693,23 @@ void bankshot2_print_io_stats(void)
 				node->total_write_actual >> 12,
 				node->total_write_required);
 	}
+
+	printf("============ Total IO stats: ============\n");
+	printf("Total IO stats:\n");
+	printf("OPEN %u, CLOSE %u\n", num_total_open, num_total_close);
+	printf("READ: count %u, total size %llu, average %llu\n",
+		num_total_read, total_read_size,
+		num_total_read ? total_read_size / num_total_read : 0);
+	printf("WRITE: count %u, total size %llu, average %llu\n",
+		num_total_write, total_write_size,
+		num_total_write ? total_write_size / num_total_write : 0);
+	printf("PREAD: count %u, total size %llu, average %llu\n",
+		num_total_pread, total_pread_size,
+		num_total_pread ? total_pread_size / num_total_pread : 0);
+	printf("PWRITE: count %u, total size %llu, average %llu\n",
+		num_total_pwrite, total_pwrite_size,
+		num_total_pwrite ? total_pwrite_size / num_total_pwrite : 0);
+	printf("=========================================\n");
 }
 
 void bankshot2_exit_handler(void)
@@ -768,6 +800,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	}
 	
 	DEBUG("\n_bankshot2_OPEN(%s)\n", path);
+	num_total_open++;
 
 	if (!bankshot2_ctrl_fd) {
 		bankshot2_ctrl_fd = _bankshot2_fileops->OPEN(bankshot2_ctrl_dev,
@@ -1036,6 +1069,7 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 	DEBUG("_bankshot2_CLOSE(%i)\n", file);
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	num_total_close++;
 
 	if (nvf->posix) {
 		nvf->valid = 0;
@@ -1221,17 +1255,22 @@ RETT_READ _bankshot2_READ(INTF_READ)
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	timing_type read_time;
+	RETT_READ result;
+
+	num_total_read++;
 
 	BANKSHOT2_START_TIMING(read_t, read_time);
 	if (nvf->posix) {
 		DEBUG("Call posix READ for fd %d\n", nvf->fd);
+		result = _bankshot2_fileops->READ(CALL_READ);
 		BANKSHOT2_END_TIMING(read_t, read_time);
-		return _bankshot2_fileops->READ(CALL_READ);
+		total_read_size += result;
+		return result;
 	}
 
 	int cpuid = GET_CPUID();
 
-	RETT_READ result = _bankshot2_check_read_size_valid(length);
+	result = _bankshot2_check_read_size_valid(length);
 	if (result <= 0) {
 		BANKSHOT2_END_TIMING(read_t, read_time);
 		return result;
@@ -1264,6 +1303,7 @@ RETT_READ _bankshot2_READ(INTF_READ)
 	bankshot2_read_check(nvf, result, CALL_READ);
 
 	BANKSHOT2_END_TIMING(read_t, read_time);
+	total_read_size += result;
 	return result;
 }
 
@@ -1273,18 +1313,23 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	timing_type write_time;
+	RETT_WRITE result;
+
+	num_total_write++;
 
 	BANKSHOT2_START_TIMING(write_t, write_time);
 
 	if (nvf->posix) {
 		DEBUG("Call posix WRITE for fd %d\n", nvf->fd);
+		result = _bankshot2_fileops->WRITE(CALL_WRITE);
 		BANKSHOT2_END_TIMING(write_t, write_time);
-		return _bankshot2_fileops->WRITE(CALL_WRITE);
+		total_write_size += result;
+		return result;
 	}
 
 	int cpuid = GET_CPUID();
 
-	RETT_WRITE result = _bankshot2_check_write_size_valid(length);
+	result = _bankshot2_check_write_size_valid(length);
 	if (result <= 0) {
 		BANKSHOT2_END_TIMING(write_t, write_time);
 		return result;
@@ -1327,6 +1372,7 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 
 	bankshot2_write_check(CALL_WRITE);
 	BANKSHOT2_END_TIMING(write_t, write_time);
+	total_write_size += result;
 
 	return result;
 }
@@ -1339,16 +1385,20 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	timing_type pread_time;
+	RETT_PREAD result;
+
+	num_total_pread++;
 
 	BANKSHOT2_START_TIMING(pread_t, pread_time);
 
 	if (nvf->posix) {
 		DEBUG("Call posix PREAD for fd %d\n", nvf->fd);
+		result = _bankshot2_fileops->PREAD(CALL_PREAD);
 		BANKSHOT2_END_TIMING(pread_t, pread_time);
-		return _bankshot2_fileops->PREAD(CALL_PREAD);
+		total_pread_size += result;
 	}
 
-	RETT_PREAD result = _bankshot2_check_read_size_valid(count);
+	result = _bankshot2_check_read_size_valid(count);
 	if (result <= 0) {
 		BANKSHOT2_END_TIMING(pread_t, pread_time);
 		return result;
@@ -1369,6 +1419,7 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 
 	BANKSHOT2_END_TIMING(pread_t, pread_time);
 
+	total_pread_size += result;
 	return result;
 }
 
@@ -1380,16 +1431,20 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
 	timing_type pwrite_time;
+	RETT_PWRITE result;
+
+	num_total_pwrite++;
 
 	BANKSHOT2_START_TIMING(pwrite_t, pwrite_time);
 
 	if (nvf->posix) {
 		DEBUG("Call posix PWRITE for fd %d\n", nvf->fd);
+		result = _bankshot2_fileops->PWRITE(CALL_PWRITE);
 		BANKSHOT2_END_TIMING(pwrite_t, pwrite_time);
-		return _bankshot2_fileops->PWRITE(CALL_PWRITE);
+		total_pwrite_size += result;
 	}
 
-	RETT_PWRITE result = _bankshot2_check_write_size_valid(count);
+	result = _bankshot2_check_write_size_valid(count);
 	if (result <= 0) {
 		BANKSHOT2_END_TIMING(pwrite_t, pwrite_time);
 		return result;
@@ -1422,6 +1477,7 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 	bankshot2_pwrite_check(CALL_PWRITE);
 
 	BANKSHOT2_END_TIMING(pwrite_t, pwrite_time);
+	total_pwrite_size += result;
 
 	return result;
 }
