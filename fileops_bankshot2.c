@@ -1636,16 +1636,38 @@ int bankshot2_get_extent(struct NVFile *nvf,
 	BANKSHOT2_START_TIMING(kernel_t, kernel_time);
 	pthread_mutex_lock(&nvf->node->mutex);
 
+	/* When we are waiting for the mutex, some other guy may already
+	 * insert the extent for use. Check tree again. */
+	cached_extent_offset = extent_info->offset;
+
+	BANKSHOT2_START_TIMING(lookup_t, lookup_time);
+	feret = find_extent(nvf, &cached_extent_offset, &cached_extent_length,
+					&cached_extent_start);
+	BANKSHOT2_END_TIMING(lookup_t, lookup_time);
+
+	extent_info->file_length = nvf->node->length;
+
+	if (feret == 1) {
+		extent_info->mmap_addr = cached_extent_start +
+				(offset - cached_extent_offset);
+		extent_info->extent_length = cached_extent_length -
+				(offset - cached_extent_offset);
+		extent_info->mmap_offset = cached_extent_offset;
+		extent_info->mmap_length = cached_extent_length;
+		ret = 0;
+		goto out;
+	}
+
 	ret = copy_to_cache(nvf, &data);
 
-	pthread_mutex_unlock(&nvf->node->mutex);
+//	pthread_mutex_unlock(&nvf->node->mutex);
 	BANKSHOT2_END_TIMING(kernel_t, kernel_time);
 
-	if (!wr_lock) {
-		NVP_LOCK_NODE_RD(nvf, cpuid);
-	} else {
-		NVP_LOCK_NODE_WR(nvf);
-	}
+//	if (!wr_lock) {
+//		NVP_LOCK_NODE_RD(nvf, cpuid);
+//	} else {
+//		NVP_LOCK_NODE_WR(nvf);
+//	}
 
 	if (rnw == READ_EXTENT)
 		nvf->node->num_read_kernels++;
@@ -1656,16 +1678,16 @@ int bankshot2_get_extent(struct NVFile *nvf,
 		ret, data.extent_start_file_offset, data.extent_start,
 		data.extent_length);
 
-	free(data.carrier);
-	free(data.extent);
+//	free(data.carrier);
+//	free(data.extent);
 
 	if (ret == 0) {
 		if (data.mmap_length) {
 			// Acquire node write lock for add_extent
-			if (!wr_lock) {
-				NVP_UNLOCK_NODE_RD(nvf, cpuid);
+//			if (!wr_lock) {
+//				NVP_UNLOCK_NODE_RD(nvf, cpuid);
 				NVP_LOCK_NODE_WR(nvf);
-			}
+//			}
 			BANKSHOT2_START_TIMING(insert_t, insert_time);
 			DEBUG("Add extent: cache fd %llu, start offset 0x%llx, "
 				"mmap_addr 0x%llx, length %llu, required %lu\n",
@@ -1690,10 +1712,10 @@ int bankshot2_get_extent(struct NVFile *nvf,
 			integrity_test_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.mmap_addr);
 			BANKSHOT2_END_TIMING(insert_t, insert_time);
-			if (!wr_lock) {
+//			if (!wr_lock) {
 				NVP_UNLOCK_NODE_WR(nvf);
-				NVP_LOCK_NODE_RD(nvf, cpuid);
-			}
+//				NVP_LOCK_NODE_RD(nvf, cpuid);
+//			}
 			if (rnw == READ_EXTENT) {
 				nvf->node->num_read_mmaps++;
 				nvf->node->total_read_mmap += data.mmap_length;
@@ -1765,6 +1787,15 @@ int bankshot2_get_extent(struct NVFile *nvf,
 		assert(0);
 	}
 out:
+	free(data.carrier);
+	free(data.extent);
+
+	pthread_mutex_unlock(&nvf->node->mutex);
+	if (!wr_lock) {
+		NVP_LOCK_NODE_RD(nvf, cpuid);
+	} else {
+		NVP_LOCK_NODE_WR(nvf);
+	}
 	return ret;
 }
 
