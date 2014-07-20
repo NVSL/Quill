@@ -464,6 +464,8 @@ unsigned int num_total_pread;
 unsigned int num_total_pwrite;
 unsigned long long total_pread_size;
 unsigned long long total_pwrite_size;
+unsigned int num_read_recheck;
+unsigned int num_write_recheck;
 
 void bankshot2_exit_handler(void);
 
@@ -707,6 +709,8 @@ void bankshot2_print_io_stats(void)
 	printf("PWRITE: count %u, total size %llu, average %llu\n",
 		num_total_pwrite, total_pwrite_size,
 		num_total_pwrite ? total_pwrite_size / num_total_pwrite : 0);
+	printf("Read recheck count %u, write recheck count %u\n",
+		num_read_recheck, num_write_recheck);
 }
 
 void bankshot2_exit_handler(void)
@@ -1654,6 +1658,10 @@ int bankshot2_get_extent(struct NVFile *nvf,
 				(offset - cached_extent_offset);
 		extent_info->mmap_offset = cached_extent_offset;
 		extent_info->mmap_length = cached_extent_length;
+		if (rnw == READ_EXTENT)
+			num_read_recheck++;
+		else
+			num_write_recheck++;
 		ret = 0;
 		goto out;
 	}
