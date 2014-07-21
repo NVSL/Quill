@@ -1638,8 +1638,9 @@ int bankshot2_get_extent(struct NVFile *nvf,
 	}
 
 	BANKSHOT2_START_TIMING(kernel_t, kernel_time);
-	pthread_mutex_lock(&nvf->node->mutex);
+//	pthread_mutex_lock(&nvf->node->mutex);
 
+#if 0
 	/* When we are waiting for the mutex, some other guy may already
 	 * insert the extent for use. Check tree again. */
 	cached_extent_offset = extent_info->offset;
@@ -1665,6 +1666,7 @@ int bankshot2_get_extent(struct NVFile *nvf,
 		ret = 0;
 		goto out;
 	}
+#endif
 
 	ret = copy_to_cache(nvf, &data);
 
@@ -1798,7 +1800,7 @@ out:
 	free(data.carrier);
 	free(data.extent);
 
-	pthread_mutex_unlock(&nvf->node->mutex);
+//	pthread_mutex_unlock(&nvf->node->mutex);
 	if (!wr_lock) {
 		NVP_LOCK_NODE_RD(nvf, cpuid);
 	} else {
