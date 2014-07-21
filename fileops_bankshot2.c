@@ -1397,6 +1397,7 @@ RETT_PREAD _bankshot2_PREAD(INTF_PREAD)
 		result = _bankshot2_fileops->PREAD(CALL_PREAD);
 		BANKSHOT2_END_TIMING(pread_t, pread_time);
 		total_pread_size += result;
+		return result;
 	}
 
 	result = _bankshot2_check_read_size_valid(count);
@@ -1443,6 +1444,7 @@ RETT_PWRITE _bankshot2_PWRITE(INTF_PWRITE)
 		result = _bankshot2_fileops->PWRITE(CALL_PWRITE);
 		BANKSHOT2_END_TIMING(pwrite_t, pwrite_time);
 		total_pwrite_size += result;
+		return result;
 	}
 
 	result = _bankshot2_check_write_size_valid(count);
