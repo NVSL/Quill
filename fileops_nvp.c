@@ -407,8 +407,8 @@ enum timing_category {
 	memcpyr_t,
 	memcpyw_t,
 	read_t,
-	pread_t,
 	write_t,
+	pread_t,
 	pwrite_t,
 	mmap_t,
 	TIMING_NUM,
@@ -1975,11 +1975,7 @@ int _nvp_extend_map(int file, size_t newcharlen)
 		nvf->node->data,
 		newmaplen,
 		max_perms, //max_perms,
-		MAP_SHARED //|  MAP_HUGETLB
-		#if MMAP_PREFAULT
-			|MAP_POPULATE
-		#endif
-		,
+		MAP_SHARED | MAP_POPULATE,
 		fd_with_max_perms, //fd_with_max_perms,
 		0
 	);
