@@ -246,7 +246,7 @@ static void * mmx2_memcpy(void * __restrict__ to, const void * __restrict__ from
     {
       delta=MMX_MMREG_SIZE-delta;
       len -= delta;
-      __memcpy(to, from, delta);
+      memcpy(to, from, delta);
     }
     i = len >> 6; /* len/64 */
     len&=63;
@@ -285,7 +285,7 @@ static void * mmx2_memcpy(void * __restrict__ to, const void * __restrict__ from
   /*
    *	Now do the tail of the block
    */
-  if(len) __memcpy(to, from, len);
+  if(len) memcpy(to, from, len);
   return retval;
 }
 
