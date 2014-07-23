@@ -399,10 +399,109 @@ long long unsigned int total_memcpy_cycles = 0;
 void report_memcpy_usec(void) { printf("Total memcpy time: %llu cycles: %f seconds\n", total_memcpy_cycles, ((float)(total_memcpy_cycles))/(2.27f*1024*1024*1024) ); }
 #endif
 
+/* ============================= Timing =============================== */
+
+enum timing_category {
+	do_pread_t = 0,
+	do_pwrite_t,
+	memcpyr_t,
+	memcpyw_t,
+	read_t,
+	pread_t,
+	write_t,
+	pwrite_t,
+	mmap_t,
+	TIMING_NUM,
+};
+
+unsigned long long Countstats[TIMING_NUM];
+unsigned long long Timingstats[TIMING_NUM];
+const char *Timingstring[TIMING_NUM] = 
+{
+	"do_pread",
+	"do_pwrite",
+	"memcpy_read",
+	"memcpy_write",
+	"READ",
+	"WRITE",
+	"PREAD",
+	"PWRITE",
+	"mmap",
+};
+
+typedef struct timespec timing_type;
+
+#if MEASURE_TIMING
+
+#define	NVP_START_TIMING(name, start) \
+	clock_gettime(CLOCK_MONOTONIC, &start)
+
+#define	NVP_END_TIMING(name, start) \
+	{timing_type end; \
+	 clock_gettime(CLOCK_MONOTONIC, &end); \
+	 Countstats[name]++; \
+	 Timingstats[name] += (end.tv_sec - start.tv_sec) * 1e9 \
+				+ (end.tv_nsec - start.tv_nsec); \
+	}
+
+void nvp_print_time_stats(void)
+{
+	int i;
+
+	printf("=========================== NVP timing stats: ==========================\n");
+	for (i = 0; i < TIMING_NUM; i++)
+		printf("%s: count %llu, timing %llu, average %llu\n",
+			Timingstring[i], Countstats[i], Timingstats[i],
+			Countstats[i] ? Timingstats[i] / Countstats[i] : 0);
+}
+
+#else
+
+#define NVP_START_TIMING(name, start) {}
+
+#define  NVP_END_TIMING(name, start) \
+	{Countstats[name]++;}
+
+void nvp_print_time_stats(void)
+{
+	int i;
+
+	printf("=========================== NVP timing stats: ==========================\n");
+	for (i = 0; i < TIMING_NUM; i++)
+		printf("%s: count %llu\n", Timingstring[i], Countstats[i]);
+}
+
+#endif
+
+/* ============================= IO stats =============================== */
+
+unsigned int num_open;
+unsigned int num_close;
+unsigned int num_read;
+unsigned int num_write;
+unsigned long long read_size;
+unsigned long long write_size;
+
+void nvp_print_io_stats(void)
+{
+	printf("=========================== NVP IO stats: ==========================\n");
+	printf("open %u, close %u\n", num_open, num_close);
+	printf("READ: count %u, size %llu, average %llu\n", num_read, read_size,
+		num_read ? read_size / num_read : 0);
+	printf("WRITE: count %u, size %llu, average %llu\n", num_write, write_size,
+		num_write ? write_size / num_write : 0);
+}
+
+void nvp_exit_handler(void)
+{
+	nvp_print_time_stats();
+	nvp_print_io_stats();
+}
+
 void _nvp_init2(void)
 {
 	#if TIME_READ_MEMCPY
-	atexit(report_memcpy_usec);
+//	atexit(report_memcpy_usec);
 	#endif
 
 	_nvp_write_pwrite_lock_handoff = 0;
@@ -434,6 +533,7 @@ void _nvp_init2(void)
 	MSG("Importing memcpy from %s\n", GLIBC_LOC);
 	*/
 
+	atexit(nvp_exit_handler);
 //	_nvp_debug_handoff();
 }
 
@@ -462,6 +562,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	}
 	
 	DEBUG("_nvp_OPEN(%s)\n", path);
+	num_open++;
 	
 	DEBUG("Attempting to _nvp_OPEN the file \"%s\" with the following flags (0x%X): ", path, oflag);
 
@@ -791,6 +892,7 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 	CHECK_RESOLVE_FILEOPS(_nvp_);
 
 	DEBUG("_nvp_CLOSE(%i)\n", file);
+	num_close++;
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
@@ -855,6 +957,9 @@ static ssize_t _nvp_check_write_size_valid(size_t count)
 RETT_READ _nvp_READ(INTF_READ)
 {
 	DEBUG("_nvp_READ %d\n", file);
+	num_read++;
+	timing_type read_time;
+	NVP_START_TIMING(read_t, read_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	
@@ -893,12 +998,17 @@ RETT_READ _nvp_READ(INTF_READ)
 
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
+	NVP_END_TIMING(read_t, read_time);
+	read_size += result;
 	return result;
 }
 
 RETT_WRITE _nvp_WRITE(INTF_WRITE)
 {
 	DEBUG("_nvp_WRITE %d\n", file);
+	num_write++;
+	timing_type write_time;
+	NVP_START_TIMING(write_t, write_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
@@ -948,6 +1058,8 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
+	NVP_END_TIMING(write_t, write_time);
+	write_size += result;
 	return result;
 }
 
@@ -956,6 +1068,9 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 	CHECK_RESOLVE_FILEOPS(_nvp_);
 
 	DEBUG("_nvp_PREAD %d\n", file);
+	num_read++;
+	timing_type read_time;
+	NVP_START_TIMING(read_t, read_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
@@ -978,6 +1093,8 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
+	NVP_END_TIMING(read_t, read_time);
+	read_size += result;
 	return result;
 }
 
@@ -986,6 +1103,9 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 	CHECK_RESOLVE_FILEOPS(_nvp_);
 
 	DEBUG("_nvp_PWRITE %d\n", file);
+	num_write++;
+	timing_type write_time;
+	NVP_START_TIMING(write_t, write_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
@@ -1021,6 +1141,8 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
+	NVP_END_TIMING(write_t, write_time);
+	write_size += result;
 	return result;
 }
 
@@ -1028,6 +1150,8 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD)
 {
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
+	timing_type do_pread_time, memcpyr_time;
+	NVP_START_TIMING(do_pread_t, do_pread_time);
 
 	ssize_t available_length = (nvf->node->length) - offset;
 
@@ -1120,7 +1244,9 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD)
 	void* result =
 	#endif
 //		FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
+		NVP_START_TIMING(memcpyr_t, memcpyr_time);
 		memcpy1(buf, nvf->node->data+offset, len_to_read);
+		NVP_END_TIMING(memcpyr_t, memcpyr_time);
 
 
 #if TIME_READ_MEMCPY
@@ -1139,6 +1265,7 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD)
 
 	DO_MSYNC(nvf);
 
+	NVP_END_TIMING(do_pread_t, do_pread_time);
 	return len_to_read;
 }
 
@@ -1146,6 +1273,8 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD)
 RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
+	timing_type do_pwrite_time, memcpyw_time;
+	NVP_START_TIMING(do_pwrite_t, do_pwrite_time);
 
 	DEBUG("_nvp_do_pwrite\n");
 
@@ -1278,7 +1407,9 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
 
+	NVP_START_TIMING(memcpyw_t, memcpyw_time);
 	FSYNC_MEMCPY(nvf->node->data+offset, buf, count);
+	NVP_END_TIMING(memcpyw_t, memcpyw_time);
 
 	if(extension > 0) {
 		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->length, nvf->node->length + extension);
@@ -1291,6 +1422,7 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 
 	DO_MSYNC(nvf);
 
+	NVP_END_TIMING(do_pwrite_t, do_pwrite_time);
 	return count;
 }
 
@@ -1734,6 +1866,8 @@ RETT_IOCTL _nvp_IOCTL(INTF_IOCTL)
 int _nvp_extend_map(int file, size_t newcharlen)
 {
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	timing_type mmap_time;
+	NVP_START_TIMING(mmap_t, mmap_time);
 
 	size_t newmaplen = (newcharlen/MMAP_PAGE_SIZE + 1)*MMAP_PAGE_SIZE;
 	
@@ -1917,6 +2051,7 @@ int _nvp_extend_map(int file, size_t newcharlen)
 	time_us += end.tv_usec-start.tv_usec;
 	MSG("Time to extend map for %p was %ius\n", nvf->node, time_us);
 #endif
+	NVP_END_TIMING(mmap_t, mmap_time);
 	return 0;
 }
 
