@@ -479,6 +479,8 @@ unsigned int num_open;
 unsigned int num_close;
 unsigned int num_read;
 unsigned int num_write;
+unsigned int num_fsync;
+unsigned int num_fdsync;
 unsigned long long read_size;
 unsigned long long write_size;
 
@@ -490,6 +492,7 @@ void nvp_print_io_stats(void)
 		num_read ? read_size / num_read : 0);
 	printf("WRITE: count %u, size %llu, average %llu\n", num_write, write_size,
 		num_write ? write_size / num_write : 0);
+	printf("fsync %u, fdsync %u\n", num_fsync, num_fdsync);
 }
 
 void nvp_exit_handler(void)
@@ -1863,12 +1866,16 @@ RETT_IOCTL _nvp_IOCTL(INTF_IOCTL)
 RETT_FSYNC _nvp_FSYNC(INTF_FSYNC)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
+	num_fsync++;
+
 	return _nvp_fileops->FSYNC(CALL_FSYNC);
 }
 
 RETT_FDSYNC _nvp_FDSYNC(INTF_FDSYNC)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
+	num_fdsync++;
+
 	return _nvp_fileops->FDSYNC(CALL_FDSYNC);
 }
 
