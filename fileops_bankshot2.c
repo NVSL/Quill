@@ -69,7 +69,7 @@ void cache_write_back(struct NVFile *nvf);
 
 RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like PWRITE, but without locks (called by _bankshot2_WRITE)
 RETT_PWRITE _bankshot2_do_pread (INTF_PREAD, int cpuid); // like PREAD , but without locks (called by _bankshot2_READ )
-RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_write
+RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64); // called by bankshot2_seek, bankshot2_seek64, bankshot2_write
 
 #define DO_MSYNC(nvf) do{}while(0)
 //	DEBUG("NOT doing a msync\n"); }while(0)
@@ -159,7 +159,8 @@ MODULE_REGISTRATION_F("bankshot2", _bankshot2_, _bankshot2_init2(); );
 #define NVP_WRAP_HAS_FD_IWRAP(r, data, elem) NVP_WRAP_HAS_FD(elem)
 #define NVP_WRAP_NO_FD_IWRAP(r, data, elem) NVP_WRAP_NO_FD(elem)
 
-BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_HAS_FD_IWRAP, placeholder, (FSYNC) (FDSYNC) (ACCEPT))
+//BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_HAS_FD_IWRAP, placeholder, (FSYNC) (FDSYNC) (ACCEPT))
+BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_HAS_FD_IWRAP, placeholder, (ACCEPT))
 BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_NO_FD_IWRAP, placeholder, (PIPE) (FORK) (SOCKET))
 
 
@@ -289,7 +290,7 @@ static char* memcpy1(char *to, char *from, size_t n)
 #define MEMCPY mmx2_memcpy
 //#define MEMCPY memcpy1
 #define MMAP mmap
-#define FSYNC fsync
+//#define FSYNC fsync
 
 #define FSYNC_POLICY_NONE 0
 #define FSYNC_POLICY_FLUSH_ON_FSYNC 1
@@ -388,6 +389,8 @@ enum timing_category {
 	pread_t,
 	write_t,
 	pwrite_t,
+	fsync_t,
+	fdsync_t,
 	TIMING_NUM,	// Last item
 };
 
@@ -406,6 +409,8 @@ const char *Timingstring[TIMING_NUM] =
 	"PREAD",
 	"WRITE",
 	"PWRITE",
+	"Fsync",
+	"Fdsync",
 };
 
 typedef struct timespec timing_type;
@@ -2707,6 +2712,32 @@ RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL)
 	int* third = va_arg(arg, int*);
 
 	RETT_IOCTL result = _bankshot2_fileops->IOCTL(file, request, third);
+
+	return result;
+}
+
+RETT_FSYNC _bankshot2_FSYNC(INTF_FSYNC)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	RETT_FSYNC result;
+	timing_type fsync_time;
+
+	BANKSHOT2_START_TIMING(fsync_t, fsync_time);
+	result = _bankshot2_fileops->FSYNC(CALL_FSYNC);
+	BANKSHOT2_END_TIMING(fsync_t, fsync_time);
+
+	return result;
+}
+
+RETT_FDSYNC _bankshot2_FDSYNC(INTF_FDSYNC)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	RETT_FDSYNC result;
+	timing_type fdsync_time;
+
+	BANKSHOT2_START_TIMING(fdsync_t, fdsync_time);
+	result = _bankshot2_fileops->FDSYNC(CALL_FDSYNC);
+	BANKSHOT2_END_TIMING(fdsync_t, fdsync_time);
 
 	return result;
 }
