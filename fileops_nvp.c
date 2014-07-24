@@ -184,9 +184,9 @@ MODULE_REGISTRATION_F("nvp", _nvp_, _nvp_init2(); );
 #define NVP_WRAP_HAS_FD_IWRAP(r, data, elem) NVP_WRAP_HAS_FD(elem)
 #define NVP_WRAP_NO_FD_IWRAP(r, data, elem) NVP_WRAP_NO_FD(elem)
 
-BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_HAS_FD_IWRAP, placeholder, (FSYNC) (FDSYNC) (ACCEPT))
+//BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_HAS_FD_IWRAP, placeholder, (FSYNC) (FDSYNC) (ACCEPT))
+BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_HAS_FD_IWRAP, placeholder, (ACCEPT))
 BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_NO_FD_IWRAP, placeholder, (PIPE) (FORK) (SOCKET))
-
 
 extern long copy_user_nocache(void *dst, const void *src, unsigned size, int zerorest);
 
@@ -314,7 +314,7 @@ static char* memcpy1(char *to, char *from, size_t n)
 #define MEMCPY mmx2_memcpy
 //#define MEMCPY memcpy1
 #define MMAP mmap
-#define FSYNC fsync
+//#define FSYNC fsync
 
 #define FSYNC_POLICY_NONE 0
 #define FSYNC_POLICY_FLUSH_ON_FSYNC 1
@@ -1845,7 +1845,6 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 	return nvf2->fd;
 }
 
-
 RETT_IOCTL _nvp_IOCTL(INTF_IOCTL)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
@@ -1859,6 +1858,18 @@ RETT_IOCTL _nvp_IOCTL(INTF_IOCTL)
 	RETT_IOCTL result = _nvp_fileops->IOCTL(file, request, third);
 
 	return result;
+}
+
+RETT_FSYNC _nvp_FSYNC(INTF_FSYNC)
+{
+	CHECK_RESOLVE_FILEOPS(_nvp_);
+	return _nvp_fileops->FSYNC(CALL_FSYNC);
+}
+
+RETT_FDSYNC _nvp_FDSYNC(INTF_FDSYNC)
+{
+	CHECK_RESOLVE_FILEOPS(_nvp_);
+	return _nvp_fileops->FDSYNC(CALL_FDSYNC);
 }
 
 #define TIME_EXTEND 0
