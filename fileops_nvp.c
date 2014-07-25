@@ -963,18 +963,21 @@ RETT_READ _nvp_READ(INTF_READ)
 	DEBUG("_nvp_READ %d\n", file);
 	num_read++;
 	timing_type read_time;
+	RETT_READ result;
 	NVP_START_TIMING(read_t, read_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	
 	if (nvf->posix) {
 		DEBUG("Call posix READ for fd %d\n", nvf->fd);
-		return _nvp_fileops->READ(CALL_READ);
+		result = _nvp_fileops->READ(CALL_READ);
+		NVP_END_TIMING(read_t, read_time);
+		return result;
 	}
 
 	int cpuid = GET_CPUID();
 
-	RETT_READ result = _nvp_check_read_size_valid(length);
+	result = _nvp_check_read_size_valid(length);
 	if (result <= 0)
 		return result;
 
@@ -1012,18 +1015,21 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 	DEBUG("_nvp_WRITE %d\n", file);
 	num_write++;
 	timing_type write_time;
+	RETT_WRITE result;
 	NVP_START_TIMING(write_t, write_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
 	if (nvf->posix) {
 		DEBUG("Call posix WRITE for fd %d\n", nvf->fd);
-		return _nvp_fileops->WRITE(CALL_WRITE);
+		result = _nvp_fileops->WRITE(CALL_WRITE);
+		NVP_END_TIMING(write_t, write_time);
+		return result;
 	}
 
 	//int iter;
 	int cpuid = GET_CPUID();
-	RETT_WRITE result = _nvp_check_write_size_valid(length);
+	result = _nvp_check_write_size_valid(length);
 	if (result <= 0)
 		return result;
 
@@ -1074,16 +1080,19 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 	DEBUG("_nvp_PREAD %d\n", file);
 	num_read++;
 	timing_type read_time;
+	RETT_PREAD result;
 	NVP_START_TIMING(read_t, read_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
 	if (nvf->posix) {
 		DEBUG("Call posix PREAD for fd %d\n", nvf->fd);
-		return _nvp_fileops->PREAD(CALL_PREAD);
+		result = _nvp_fileops->PREAD(CALL_PREAD);
+		NVP_END_TIMING(read_t, read_time);
+		return result;
 	}
 
-	RETT_PREAD result = _nvp_check_read_size_valid(count);
+	result = _nvp_check_read_size_valid(count);
 	if (result <= 0)
 		return result;
 
@@ -1109,16 +1118,19 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 	DEBUG("_nvp_PWRITE %d\n", file);
 	num_write++;
 	timing_type write_time;
+	RETT_PWRITE result;
 	NVP_START_TIMING(write_t, write_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
 	if (nvf->posix) {
 		DEBUG("Call posix PWRITE for fd %d\n", nvf->fd);
-		return _nvp_fileops->PWRITE(CALL_PWRITE);
+		result = _nvp_fileops->PWRITE(CALL_PWRITE);
+		NVP_END_TIMING(write_t, write_time);
+		return result;
 	}
 
-	RETT_PWRITE result = _nvp_check_write_size_valid(count);
+	result = _nvp_check_write_size_valid(count);
 	if (result <= 0)
 		return result;
 	
