@@ -1081,14 +1081,14 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 	num_read++;
 	timing_type read_time;
 	RETT_PREAD result;
-	NVP_START_TIMING(read_t, read_time);
+	NVP_START_TIMING(pread_t, read_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
 	if (nvf->posix) {
 		DEBUG("Call posix PREAD for fd %d\n", nvf->fd);
 		result = _nvp_fileops->PREAD(CALL_PREAD);
-		NVP_END_TIMING(read_t, read_time);
+		NVP_END_TIMING(pread_t, read_time);
 		return result;
 	}
 
@@ -1106,7 +1106,7 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
-	NVP_END_TIMING(read_t, read_time);
+	NVP_END_TIMING(pread_t, read_time);
 	read_size += result;
 	return result;
 }
@@ -1119,14 +1119,14 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 	num_write++;
 	timing_type write_time;
 	RETT_PWRITE result;
-	NVP_START_TIMING(write_t, write_time);
+	NVP_START_TIMING(pwrite_t, write_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 
 	if (nvf->posix) {
 		DEBUG("Call posix PWRITE for fd %d\n", nvf->fd);
 		result = _nvp_fileops->PWRITE(CALL_PWRITE);
-		NVP_END_TIMING(write_t, write_time);
+		NVP_END_TIMING(pwrite_t, write_time);
 		return result;
 	}
 
@@ -1157,7 +1157,7 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
-	NVP_END_TIMING(write_t, write_time);
+	NVP_END_TIMING(pwrite_t, write_time);
 	write_size += result;
 	return result;
 }
