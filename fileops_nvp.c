@@ -410,9 +410,9 @@ enum timing_category {
 	write_t,
 	pread_t,
 	pwrite_t,
-	mmap_t,
 	fsync_t,
 	fdsync_t,
+	mmap_t,
 	TIMING_NUM,
 };
 
@@ -773,6 +773,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	nvf->serialno = file_st.st_ino;
 
 	nvf->node = node;
+	nvf->posix = 0;
 
 	// Set FD permissions
 	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
@@ -841,9 +842,10 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 
 	DEBUG("Meh, why not allocate a new map every time\n");
 	//nvf->node->maplength = -1;
+//	nvf->posix = 1;
 
-//	if(nvf->node->maplength < nvf->node->length)
-//	{
+	if (nvf->posix == 0)
+	{
 //		DEBUG("map was not already allocated (was %li).  Let's allocate one.\n", nvf->node->maplength);
 //		_nvp_extend_map(nvf->fd, nvf->node->length);
 	
@@ -865,7 +867,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		}
 
 		DEBUG("mmap successful.  result: %p\n", nvf->node->data);
-//	}
+	}
 
 	SANITYCHECK(nvf->node->length >= 0);
 	SANITYCHECK(nvf->node->maplength > nvf->node->length);
@@ -972,6 +974,7 @@ RETT_READ _nvp_READ(INTF_READ)
 		DEBUG("Call posix READ for fd %d\n", nvf->fd);
 		result = _nvp_fileops->READ(CALL_READ);
 		NVP_END_TIMING(read_t, read_time);
+		read_size += result;
 		return result;
 	}
 
@@ -1024,6 +1027,7 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 		DEBUG("Call posix WRITE for fd %d\n", nvf->fd);
 		result = _nvp_fileops->WRITE(CALL_WRITE);
 		NVP_END_TIMING(write_t, write_time);
+		write_size += result;
 		return result;
 	}
 
@@ -1089,6 +1093,7 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 		DEBUG("Call posix PREAD for fd %d\n", nvf->fd);
 		result = _nvp_fileops->PREAD(CALL_PREAD);
 		NVP_END_TIMING(pread_t, read_time);
+		read_size += result;
 		return result;
 	}
 
@@ -1127,6 +1132,7 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 		DEBUG("Call posix PWRITE for fd %d\n", nvf->fd);
 		result = _nvp_fileops->PWRITE(CALL_PWRITE);
 		NVP_END_TIMING(pwrite_t, write_time);
+		write_size += result;
 		return result;
 	}
 
