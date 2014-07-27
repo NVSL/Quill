@@ -2700,7 +2700,6 @@ RETT_DUP2 _bankshot2_DUP2(INTF_DUP2)
 	return nvf2->fd;
 }
 
-
 RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL)
 {
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
@@ -2715,6 +2714,79 @@ RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL)
 
 	return result;
 }
+
+#if ENABLE_FSYNC
+
+int bankshot2_sync(struct NVFile *nvf, struct bankshot2_cache_data *data)
+{
+	int result;
+
+	DEBUG("bankshot2 sync: fd %d, cache inode %d\n",
+			data->file, data->cache_ino);
+
+	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
+					BANKSHOT2_IOCTL_FSYNC_DATA, data);
+	if (result < 0) {
+		ERROR("ioctl cache data read failed %d\n", result);
+		assert(0);
+	}
+
+	return result;
+}
+
+RETT_FSYNC _bankshot2_FSYNC(INTF_FSYNC)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	RETT_FSYNC result;
+	timing_type fsync_time;
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	struct bankshot2_cache_data data;
+	void *carrier;
+
+	memset(&data, 0, sizeof(struct bankshot2_cache_data));
+	data.file = nvf->fd;
+	posix_memalign(&carrier, PAGE_SIZE, MAX_MMAP_SIZE);
+	if (!carrier)
+		assert(0);
+	data.carrier = (char *)carrier;
+	data.cache_ino = nvf->cache_serialno;
+	data.datasync = 0;
+
+	BANKSHOT2_START_TIMING(fsync_t, fsync_time);
+	result = bankshot2_sync(nvf, &data);
+	BANKSHOT2_END_TIMING(fsync_t, fsync_time);
+
+	free(carrier);
+	return result;
+}
+
+RETT_FDSYNC _bankshot2_FDSYNC(INTF_FDSYNC)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	RETT_FDSYNC result;
+	timing_type fdsync_time;
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	struct bankshot2_cache_data data;
+	void *carrier;
+
+	memset(&data, 0, sizeof(struct bankshot2_cache_data));
+	data.file = nvf->fd;
+	posix_memalign(&carrier, PAGE_SIZE, MAX_MMAP_SIZE);
+	if (!carrier)
+		assert(0);
+	data.carrier = (char *)carrier;
+	data.cache_ino = nvf->cache_serialno;
+	data.datasync = 1;
+
+	BANKSHOT2_START_TIMING(fdsync_t, fdsync_time);
+	result = bankshot2_sync(nvf, &data);
+	BANKSHOT2_END_TIMING(fdsync_t, fdsync_time);
+
+	free(carrier);
+	return result;
+}
+
+#else
 
 RETT_FSYNC _bankshot2_FSYNC(INTF_FSYNC)
 {
@@ -2741,6 +2813,8 @@ RETT_FDSYNC _bankshot2_FDSYNC(INTF_FDSYNC)
 
 	return result;
 }
+
+#endif
 
 #define TIME_EXTEND 0
 
