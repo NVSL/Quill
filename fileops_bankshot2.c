@@ -2107,6 +2107,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		#if COUNT_EXTENDS
 		_bankshot2_wr_extended++;
 		#endif
+		int fallocated = 0;
 
 		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
 			count, nvf->node->length, offset, count, extension);
@@ -2135,6 +2136,9 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 //					count, offset);
 
 #if ENABLE_FALLOC
+		if (extension <= 32768)
+			goto do_pwrite;
+
 		timing_type falloc_time;
 		BANKSHOT2_START_TIMING(falloc_t, falloc_time);
 		ret = fallocate(file, 0, nvf->node->length, extension);
@@ -2142,7 +2146,15 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			ERROR("Extend file %d from %lu to %lu failed, "
 				"trying pwrite\n", file, nvf->node->length,
 				count + offset);
+		} else {
+			BANKSHOT2_END_TIMING(falloc_t, falloc_time);
+			DEBUG("Done extending NVFile.\n");
+			bankshot2_update_file_length(nvf, count + offset);
+			fallocated = 1;
+		}
+do_pwrite:
 #endif
+		if (fallocated == 0) {
 			posix_write = _bankshot2_fileops->PWRITE(file, buf,
 					count, offset);
 			if (offset + posix_write > file_length)
@@ -2151,12 +2163,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			write_count = posix_write;
 			nvf->node->num_posix_writes++;
 			goto out;
-#if ENABLE_FALLOC
 		}
-		BANKSHOT2_END_TIMING(falloc_t, falloc_time);
-		DEBUG("Done extending NVFile.\n");
-		bankshot2_update_file_length(nvf, count + offset);
-#endif
 	}
 	else
 	{
