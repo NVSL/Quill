@@ -2129,15 +2129,29 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			assert(0);
 		}
 #endif
-		posix_write = _bankshot2_fileops->PWRITE(file, buf,
+//		posix_write = _bankshot2_fileops->PWRITE(file, buf,
+//					count, offset);
+
+#if ENABLE_FALLOC
+		ret = fallocate(file, 0, nvf->node->length, extension);
+		if (ret) {
+			ERROR("Extend file %d from %lu to %lu failed, "
+				"trying pwrite\n", file, nvf->node->length,
+				count + offset);
+#endif
+			posix_write = _bankshot2_fileops->PWRITE(file, buf,
 					count, offset);
-		if (offset + posix_write > file_length) {
-			bankshot2_update_file_length(nvf, offset + posix_write);
+			if (offset + posix_write > file_length)
+				bankshot2_update_file_length(nvf,
+						offset + posix_write);
+			write_count = posix_write;
+			nvf->node->num_posix_writes++;
+			goto out;
+#if ENABLE_FALLOC
 		}
 		DEBUG("Done extending NVFile.\n");
-		write_count = posix_write;
-		nvf->node->num_posix_writes++;
-		goto out;
+		bankshot2_update_file_length(nvf, count + offset);
+#endif
 	}
 	else
 	{
