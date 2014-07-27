@@ -391,6 +391,7 @@ enum timing_category {
 	pwrite_t,
 	fsync_t,
 	fdsync_t,
+	falloc_t,
 	TIMING_NUM,	// Last item
 };
 
@@ -411,6 +412,7 @@ const char *Timingstring[TIMING_NUM] =
 	"PWRITE",
 	"Fsync",
 	"Fdsync",
+	"Fallocate",
 };
 
 typedef struct timespec timing_type;
@@ -2133,6 +2135,8 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 //					count, offset);
 
 #if ENABLE_FALLOC
+		timing_type falloc_time;
+		BANKSHOT2_START_TIMING(falloc_t, falloc_time);
 		ret = fallocate(file, 0, nvf->node->length, extension);
 		if (ret) {
 			ERROR("Extend file %d from %lu to %lu failed, "
@@ -2149,6 +2153,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			goto out;
 #if ENABLE_FALLOC
 		}
+		BANKSHOT2_END_TIMING(falloc_t, falloc_time);
 		DEBUG("Done extending NVFile.\n");
 		bankshot2_update_file_length(nvf, count + offset);
 #endif
