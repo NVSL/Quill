@@ -385,6 +385,7 @@ enum timing_category {
 	lookup_t,
 	insert_t,
 	kernel_t,
+	get_inode_t,
 	read_t,
 	pread_t,
 	write_t,
@@ -406,6 +407,7 @@ const char *Timingstring[TIMING_NUM] =
 	"Tree_lookup",
 	"Tree_insert",
 	"kernel",
+	"Get_inode",
 	"READ",
 	"PREAD",
 	"WRITE",
@@ -571,6 +573,7 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 
 	int result;
 	struct bankshot2_cache_data data;
+	timing_type get_inode_time;
 
 	struct NVNode* node = nvf->node;
 
@@ -585,8 +588,10 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	data.write = nvf->canWrite ? 1 : 0;
 
 	DEBUG("Send IOCTL_GET_INODE request\n");
+	BANKSHOT2_START_TIMING(get_inode_t, get_inode_time);
 	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
 					BANKSHOT2_IOCTL_GET_INODE, &data);
+	BANKSHOT2_END_TIMING(get_inode_t, get_inode_time);
 
 	if(result<0)
 	{
