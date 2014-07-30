@@ -772,6 +772,9 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	
 	nvf->serialno = file_st.st_ino;
 
+	if (nvf->node != node)
+		free(nvf->node);
+
 	nvf->node = node;
 	nvf->posix = 0;
 
@@ -1930,7 +1933,11 @@ int _nvp_extend_map(int file, size_t newcharlen)
 	struct timeval end;
 	gettimeofday(&start, NULL);
 #endif
-	if(nvf->node->maplength > 0) {
+	if (nvf->node->maplength >= newmaplen && nvf->node->data) {
+		return 0;
+	}
+	
+	if (nvf->node->maplength > 0) {
 		newmaplen *= 2;
 	}
 	
