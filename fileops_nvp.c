@@ -844,6 +844,13 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	//nvf->node->maplength = -1;
 //	nvf->posix = 1;
 
+	/* This is a nasty workaround for FIO */
+	if (path[0] == '/' && path[1] == 's'
+			&& path[2] == 'y' && path[3] == 's') {
+		nvf->posix = 1;
+		MSG("A Posix Path: %s\n", path);
+	}
+
 	if (nvf->posix == 0)
 	{
 //		DEBUG("map was not already allocated (was %li).  Let's allocate one.\n", nvf->node->maplength);
