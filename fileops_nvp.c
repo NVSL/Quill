@@ -879,7 +879,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		}
 
 		SANITYCHECK(nvf->node->maplength > 0);
-		SANITYCHECK(nvf->node->maplength >= nvf->node->length);
+//		SANITYCHECK(nvf->node->maplength >= nvf->node->length);
 		
 		if(nvf->node->data < 0) {
 			ERROR("Failed to mmap path %s: %s\n", path, strerror(errno));
@@ -890,7 +890,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	}
 
 	SANITYCHECK(nvf->node->length >= 0);
-	SANITYCHECK(nvf->node->maplength >= nvf->node->length);
+//	SANITYCHECK(nvf->node->maplength >= nvf->node->length);
 
 	nvf->offset = (size_t*)calloc(1, sizeof(int));
 	*nvf->offset = 0;
@@ -1192,12 +1192,33 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 	return result;
 }
 
+static int nvp_get_mmap_address(struct NVFile *nvf, off_t offset, size_t count,
+		unsigned long *mmap_addr, size_t *extent_length, int wr_lock,
+		int cpuid)
+{
+	int ret;
+
+	if (offset >= nvf->node->maplength)
+		return 1;
+
+	*mmap_addr = (unsigned long)nvf->node->data + offset;
+	*extent_length = nvf->node->maplength - offset;
+
+	return 0;
+}
+
+
 RETT_PREAD _nvp_do_pread(INTF_PREAD)
 {
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
 	timing_type do_pread_time, memcpyr_time;
 	NVP_START_TIMING(do_pread_t, do_pread_time);
+	int ret;
+	off_t read_offset;
+	size_t read_count, extent_length;
+	size_t posix_read;
+	unsigned long mmap_addr = 0;
 
 	ssize_t available_length = (nvf->node->length) - offset;
 
@@ -1278,41 +1299,57 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD)
 	DEBUG("mmap is length %li, len_to_read is %li\n", nvf->node->maplength, len_to_read);
 
 	SANITYCHECK(len_to_read + offset <= nvf->node->length);
-	SANITYCHECK(nvf->node->length < nvf->node->maplength);
+//	SANITYCHECK(nvf->node->length < nvf->node->maplength);
 
-#if TIME_READ_MEMCPY
-//	int cpu = get_cpuid();
-	uint64_t start_time = getcycles();
-#endif
+	read_count = 0;
+	read_offset = offset;
 
-	#if NOSANITYCHECK
-	#else
-	void* result =
-	#endif
-//		FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
-		NVP_START_TIMING(memcpyr_t, memcpyr_time);
-		memcpy1(buf, nvf->node->data+offset, len_to_read);
-		NVP_END_TIMING(memcpyr_t, memcpyr_time);
+	while (len_to_read > 0) {
+		ret = nvp_get_mmap_address(nvf, read_offset, read_count,
+					&mmap_addr, &extent_length, 0, 0);
 
+		DEBUG("Pread: get_mmap_address returned %d, length %llu\n",
+			ret, extent_length);
 
-#if TIME_READ_MEMCPY
-	uint64_t end_time = getcycles();
-	total_memcpy_cycles += end_time - start_time;
-//	if(cpu != get_cpuid()) {
-//		printf("cpuid changed\n");
-//		exit(1);
-//	}
-#endif
+		switch (ret) {
+ 		case 0: // Mmaped. Do memcpy.
+			break;
+		case 1: // Not mmaped. Calling Posix pread.
+			posix_read = _nvp_fileops->PREAD(file, buf,
+					len_to_read, read_offset);
+			if (read_offset + posix_read > nvf->node->length)
+				nvf->node->length = read_offset + posix_read;
+			read_count += posix_read;
+			goto out;
+		default:
+			break;
+		}
 
-	SANITYCHECK(result == buf);
-	SANITYCHECK(result > 0);
+		if (extent_length > len_to_read)
+			extent_length = len_to_read;
 
-	// nvf->offset += len_to_read; // NOT IN PREAD (this happens in read)
+		#if NOSANITYCHECK
+		#else
+		void* result =
+		#endif
+//			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
+			NVP_START_TIMING(memcpyr_t, memcpyr_time);
+			memcpy1(buf, (char *)mmap_addr, extent_length);
+			NVP_END_TIMING(memcpyr_t, memcpyr_time);
+
+		SANITYCHECK(result == buf);
+		SANITYCHECK(result > 0);
+
+		len_to_read -= extent_length;
+		read_offset += extent_length;
+		read_count  += extent_length;
+		buf += extent_length;
+	}
 
 	DO_MSYNC(nvf);
-
+out:
 	NVP_END_TIMING(do_pread_t, do_pread_time);
-	return len_to_read;
+	return read_count;
 }
 
 
@@ -1321,6 +1358,11 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 	CHECK_RESOLVE_FILEOPS(_nvp_);
 	timing_type do_pwrite_time, memcpyw_time;
 	NVP_START_TIMING(do_pwrite_t, do_pwrite_time);
+	int ret;
+	off_t write_offset;
+	size_t write_count, extent_length;
+	size_t posix_write;
+	unsigned long mmap_addr = 0;
 
 	DEBUG("_nvp_do_pwrite\n");
 
@@ -1418,8 +1460,8 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 
 		if( offset+count >= nvf->node->maplength )
 		{
-			DEBUG("Request will also extend map.\n");
-			_nvp_extend_map(file, offset+count );
+//			DEBUG("Request will also extend map.\n");
+//			_nvp_extend_map(file, offset+count );
 		} else {
 			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->maplength, offset+count);
 			SANITYCHECK(nvf->node->maplength > (offset+count));
@@ -1454,13 +1496,43 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
 
-	NVP_START_TIMING(memcpyw_t, memcpyw_time);
-	FSYNC_MEMCPY(nvf->node->data+offset, buf, count);
-	NVP_END_TIMING(memcpyw_t, memcpyw_time);
+	ssize_t len_to_write = count;
 
-	if(extension > 0) {
-		DEBUG("Extending file length by %li from %li to %li\n", extension, nvf->node->length, nvf->node->length + extension);
-		nvf->node->length += extension;
+	write_count = 0;
+	write_offset = offset;
+
+	while (len_to_write > 0) {
+		ret = nvp_get_mmap_address(nvf, write_offset, write_count,
+					&mmap_addr, &extent_length, 0, 0);
+
+		DEBUG("Pwrite: get_mmap_address returned %d, length %llu\n",
+					ret, extent_length);
+
+		switch (ret) {
+ 		case 0: // Mmaped. Do memcpy.
+			break;
+		case 1: // Not mmaped. Calling Posix pread.
+			posix_write = _nvp_fileops->PWRITE(file, buf,
+					len_to_write, write_offset);
+			if (write_offset + posix_write > nvf->node->length)
+				nvf->node->length = write_offset + posix_write;
+			write_count += posix_write;
+			goto out;
+		default:
+			break;
+		}
+
+		if (extent_length > len_to_write)
+			extent_length = len_to_write;
+
+		NVP_START_TIMING(memcpyw_t, memcpyw_time);
+		FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
+		NVP_END_TIMING(memcpyw_t, memcpyw_time);
+
+		len_to_write -= extent_length;
+		write_offset += extent_length;
+		write_count  += extent_length;
+		buf += extent_length;
 	}
 
 	//nvf->offset += count; // NOT IN PWRITE (this happens in write)
@@ -1469,8 +1541,9 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 
 	DO_MSYNC(nvf);
 
+out:
 	NVP_END_TIMING(do_pwrite_t, do_pwrite_time);
-	return count;
+	return write_count;
 }
 
 RETT_SEEK _nvp_SEEK(INTF_SEEK)
