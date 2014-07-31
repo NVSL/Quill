@@ -77,6 +77,7 @@ struct NVFile
 	ino_t serialno; // duplicated so that iterating doesn't require following every node*
 	struct NVNode* node;
 	bool posix;
+	bool debug;
 };
 
 struct NVNode
@@ -665,11 +666,11 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		if(node==NULL) {
 			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
-//			int asdf=1; while(asdf){};
 			NVP_LOCK_INIT(node->lock);
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
+			node->data = NULL;
 		}
 		
 		NVP_LOCK_WR(node->lock);
@@ -750,6 +751,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
+			node->data = NULL;
 		}
 		
 		NVP_LOCK_WR(node->lock);
@@ -772,8 +774,8 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	
 	nvf->serialno = file_st.st_ino;
 
-	if (nvf->node != node)
-		free(nvf->node);
+//	if (nvf->node != node)
+//		free(nvf->node);
 
 	nvf->node = node;
 	nvf->posix = 0;
@@ -845,7 +847,8 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 
 	DEBUG("Meh, why not allocate a new map every time\n");
 	//nvf->node->maplength = -1;
-//	nvf->posix = 1;
+	nvf->posix = 0;
+	nvf->debug = 0;
 
 	/* This is a nasty workaround for FIO */
 	if (path[0] == '/' && path[1] == 's'
@@ -854,13 +857,20 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		MSG("A Posix Path: %s\n", path);
 	}
 
-	if (nvf->posix == 0)
+	/* For BDB log file, workaround the fdsync issue */
+	if (path[29] == 'l' && path[30] == 'o' && path[31] == 'g') {
+		nvf->debug = 1;
+//		MSG("A Posix Path: %s\n", path);
+	}
+
+	if (nvf->posix == 0 && nvf->node->length > 0)
 	{
 //		DEBUG("map was not already allocated (was %li).  Let's allocate one.\n", nvf->node->maplength);
 //		_nvp_extend_map(nvf->fd, nvf->node->length);
 	
 		//if(_nvp_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
-		if(_nvp_extend_map(nvf->fd, MAX(1, nvf->node->length)))
+		DEBUG("Mmap file %s length %lu\n", path, nvf->node->length);
+		if(_nvp_extend_map(nvf->fd, nvf->node->length))
 		{
 			DEBUG("Failed to _nvp_extend_map, passing it up the chain\n");
 			NVP_UNLOCK_NODE_WR(nvf);
@@ -869,7 +879,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		}
 
 		SANITYCHECK(nvf->node->maplength > 0);
-		SANITYCHECK(nvf->node->maplength > nvf->node->length);
+		SANITYCHECK(nvf->node->maplength >= nvf->node->length);
 		
 		if(nvf->node->data < 0) {
 			ERROR("Failed to mmap path %s: %s\n", path, strerror(errno));
@@ -880,7 +890,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	}
 
 	SANITYCHECK(nvf->node->length >= 0);
-	SANITYCHECK(nvf->node->maplength > nvf->node->length);
+	SANITYCHECK(nvf->node->maplength >= nvf->node->length);
 
 	nvf->offset = (size_t*)calloc(1, sizeof(int));
 	*nvf->offset = 0;
@@ -979,7 +989,7 @@ RETT_READ _nvp_READ(INTF_READ)
 	NVP_START_TIMING(read_t, read_time);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
-	
+
 	if (nvf->posix) {
 		DEBUG("Call posix READ for fd %d\n", nvf->fd);
 		result = _nvp_fileops->READ(CALL_READ);
@@ -1020,6 +1030,7 @@ RETT_READ _nvp_READ(INTF_READ)
 
 	NVP_END_TIMING(read_t, read_time);
 	read_size += result;
+
 	return result;
 }
 
@@ -1084,6 +1095,7 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 
 	NVP_END_TIMING(write_t, write_time);
 	write_size += result;
+
 	return result;
 }
 
@@ -1123,6 +1135,7 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 
 	NVP_END_TIMING(pread_t, read_time);
 	read_size += result;
+
 	return result;
 }
 
@@ -1175,6 +1188,7 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 
 	NVP_END_TIMING(pwrite_t, write_time);
 	write_size += result;
+
 	return result;
 }
 
@@ -1379,28 +1393,16 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
 			count, nvf->node->length, offset, count, extension);
 		
-		if( offset+count >= nvf->node->maplength )
-		{
-			DEBUG("Request will also extend map; doing that before extending file.\n");
-			_nvp_extend_map(file, offset+count );
-		} else {
-			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->maplength, offset+count);
-			SANITYCHECK(nvf->node->maplength > (offset+count));
-		}
-
-		DEBUG("Done extending map(s), now let's exend the file with PWRITE ");
-
-//volatile int asdf=1; while(asdf){};
-
 		ssize_t temp_result;
 		if(nvf->aligned) {
 			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _nvp_fileops->name, nvf->fd, _nvp_zbuf, 512, count+offset-512);
-			temp_result = _nvp_fileops->PWRITE(nvf->fd, _nvp_zbuf, 512, count + offset - 512);
+//			temp_result = _nvp_fileops->PWRITE(nvf->fd, _nvp_zbuf, 512, count + offset - 512);
 		} else {
 			DEBUG_P("(unaligned)\n");
-			temp_result = _nvp_fileops->PWRITE(nvf->fd, "\0", 1, count + offset - 1);
+//			temp_result = _nvp_fileops->PWRITE(nvf->fd, "\0", 1, count + offset - 1);
 		}	
 
+#if 0
 		if(temp_result != ((nvf->aligned)?512:1))
 		{
 			ERROR("Failed to use posix->pwrite to extend the file to the required length: returned %li, expected %li: %s\n", temp_result, ((nvf->aligned)?512:1), strerror(errno));
@@ -1410,8 +1412,21 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 			PRINT_ERROR_NAME(errno);
 			assert(0);
 		}
+#endif
+		temp_result = _nvp_fileops->PWRITE(nvf->fd, buf, count, offset);
+		DEBUG("Done extending NVFile, now let's extend mapping.\n");
 
-		DEBUG("Done extending NVFile.\n");
+		if( offset+count >= nvf->node->maplength )
+		{
+			DEBUG("Request will also extend map.\n");
+			_nvp_extend_map(file, offset+count );
+		} else {
+			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->maplength, offset+count);
+			SANITYCHECK(nvf->node->maplength > (offset+count));
+		}
+
+		nvf->node->length += extension;
+		return temp_result;
 	}
 	else
 	{
@@ -1602,14 +1617,14 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 
 	if(length > nvf->node->length)
 	{
-		DEBUG("TRUNC64 extended file from %li to %li\n", nvf->node->length, length);
+		MSG("TRUNC64 extended file from %li to %li\n", nvf->node->length, length);
 	}
 	else 
 	{
-		DEBUG("TRUNC64 shortened file from %li to %li\n", nvf->node->length, length);
+		MSG("TRUNC64 shortened file from %li to %li\n", nvf->node->length, length);
 	}
 
-	DEBUG("Done with trunc, we better update map!\n");
+	MSG("Done with trunc, we better update map!\n");
 
 	_nvp_extend_map(nvf->fd, length);
 
@@ -1908,11 +1923,15 @@ RETT_FSYNC _nvp_FSYNC(INTF_FSYNC)
 RETT_FDSYNC _nvp_FDSYNC(INTF_FDSYNC)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
+	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	RETT_FDSYNC result;
 	timing_type fdsync_time;
 
 	NVP_START_TIMING(fdsync_t, fdsync_time);
-	result = _nvp_fileops->FDSYNC(CALL_FDSYNC);
+	if (nvf->debug)
+		result = 0;
+	else
+		result = _nvp_fileops->FDSYNC(CALL_FDSYNC);
 	NVP_END_TIMING(fdsync_t, fdsync_time);
 
 	return result;
@@ -1926,7 +1945,12 @@ int _nvp_extend_map(int file, size_t newcharlen)
 	timing_type mmap_time;
 	NVP_START_TIMING(mmap_t, mmap_time);
 
-	size_t newmaplen = (newcharlen/MMAP_PAGE_SIZE + 1)*MMAP_PAGE_SIZE;
+	size_t newmaplen;
+
+	if (newcharlen % MMAP_PAGE_SIZE)
+		newmaplen = (newcharlen / MMAP_PAGE_SIZE + 1) * MMAP_PAGE_SIZE;
+	else
+		newmaplen = newcharlen;
 	
 #if TIME_EXTEND
 	struct timeval start;
@@ -1937,10 +1961,10 @@ int _nvp_extend_map(int file, size_t newcharlen)
 		return 0;
 	}
 	
-	if (nvf->node->maplength > 0) {
-		newmaplen *= 2;
-	}
-	
+//	if (nvf->node->maplength > 0) {
+//		newmaplen *= 2;
+//	}
+
 	//int newmaplen = newcharlen + 1;
 
 	SANITYCHECK(nvf->node != NULL);
@@ -2031,6 +2055,7 @@ int _nvp_extend_map(int file, size_t newcharlen)
 
 
 	// mmap replaces old maps where they intersect
+	DEBUG("Mmap length %lu\n", newmaplen);
 	char* result = (char*) FSYNC_MMAP
 	(
 		nvf->node->data,
@@ -2108,6 +2133,7 @@ int _nvp_extend_map(int file, size_t newcharlen)
 	time_us += end.tv_usec-start.tv_usec;
 	MSG("Time to extend map for %p was %ius\n", nvf->node, time_us);
 #endif
+	DEBUG("Mmap result %p\n", nvf->node->data);
 	NVP_END_TIMING(mmap_t, mmap_time);
 	return 0;
 }
