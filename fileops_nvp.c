@@ -19,6 +19,9 @@
 #define MANUAL_PREFAULT 0
 #define MMAP_PREFAULT 1
 
+#define MAX_MMAP_SIZE	2097152
+#define	ALIGN_MMAP_DOWN(addr)	((addr) & ~(MAX_MMAP_SIZE - 1))
+
 #define DO_ALIGNMENT_CHECKS 0
 
 struct timezone;
@@ -87,6 +90,8 @@ struct NVNode
 	char* volatile data; // the pointer itself is volatile
 	volatile size_t length;
 	volatile size_t maplength;
+	unsigned long *root;
+	unsigned int height;
 //	volatile int maxPerms;
 //	volatile int valid; // for debugging purposes
 };
@@ -98,8 +103,8 @@ int _nvp_extend_map(int file, size_t newlen);
 void _nvp_SIGBUS_handler(int sig);
 void _nvp_test_invalidate_node(struct NVFile* nvf);
 
-RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE); // like PWRITE, but without locks (called by _nvp_WRITE)
-RETT_PWRITE _nvp_do_pread (INTF_PREAD ); // like PREAD , but without locks (called by _nvp_READ )
+RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like PWRITE, but without locks (called by _nvp_WRITE)
+RETT_PWRITE _nvp_do_pread (INTF_PREAD, int wr_lock, int cpuid); // like PREAD , but without locks (called by _nvp_READ )
 RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_write
 
 #define DO_MSYNC(nvf) do{ \
@@ -666,11 +671,16 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		if(node==NULL) {
 			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
+			memset(node, 0, sizeof(struct NVNode));
 			NVP_LOCK_INIT(node->lock);
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
 			node->data = NULL;
+			node->height = 0;
+			node->root = malloc(1024 * sizeof(unsigned long));
+			for (i = 0; i < 1024; i++)
+				node->root[i] = 0;
 		}
 		
 		NVP_LOCK_WR(node->lock);
@@ -747,11 +757,16 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		if(node==NULL) {
 			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
+			memset(node, 0, sizeof(struct NVNode));
 			NVP_LOCK_INIT(_nvp_fd_lookup[i].lock);
 			node->length = file_st.st_size;
 			node->maplength = 0;
 			node->serialno = file_st.st_ino;
 			node->data = NULL;
+			node->height = 0;
+			node->root = malloc(1024 * sizeof(unsigned long));
+			for (i = 0; i < 1024; i++)
+				node->root[i] = 0;
 		}
 		
 		NVP_LOCK_WR(node->lock);
@@ -863,6 +878,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 //		MSG("A Posix Path: %s\n", path);
 	}
 
+#if 0
 	if (nvf->posix == 0 && nvf->node->length > 0)
 	{
 //		DEBUG("map was not already allocated (was %li).  Let's allocate one.\n", nvf->node->maplength);
@@ -888,6 +904,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 
 		DEBUG("mmap successful.  result: %p\n", nvf->node->data);
 	}
+#endif
 
 	SANITYCHECK(nvf->node->length >= 0);
 //	SANITYCHECK(nvf->node->maplength >= nvf->node->length);
@@ -1009,7 +1026,8 @@ RETT_READ _nvp_READ(INTF_READ)
 
 	NVP_LOCK_NODE_RD(nvf, cpuid);
 
-	result = _nvp_do_pread(CALL_READ, __sync_fetch_and_add(nvf->offset, length));
+	result = _nvp_do_pread(CALL_READ,
+			__sync_fetch_and_add(nvf->offset, length), 0, cpuid);
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	
@@ -1062,7 +1080,8 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid); //TODO
 
-	result = _nvp_do_pwrite(CALL_WRITE, __sync_fetch_and_add(nvf->offset, length));
+	result = _nvp_do_pwrite(CALL_WRITE,
+			__sync_fetch_and_add(nvf->offset, length), 0, cpuid);
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 
@@ -1128,7 +1147,7 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 	NVP_CHECK_NVF_VALID(nvf);
 	NVP_LOCK_NODE_RD(nvf, cpuid);
 
-	result = _nvp_do_pread(CALL_PREAD);
+	result = _nvp_do_pread(CALL_PREAD, 0, cpuid);
 
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
@@ -1175,12 +1194,12 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 		NVP_LOCK_NODE_WR(nvf);
 		
-		result = _nvp_do_pwrite(CALL_PWRITE);
+		result = _nvp_do_pwrite(CALL_PWRITE, 1, cpuid);
 
 		NVP_UNLOCK_NODE_WR(nvf);
 	}
 	else {
-		result = _nvp_do_pwrite(CALL_PWRITE);
+		result = _nvp_do_pwrite(CALL_PWRITE, 0, cpuid);
 		NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	}
 
@@ -1192,23 +1211,124 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 	return result;
 }
 
+static unsigned long calculate_capacity(unsigned int height)
+{
+	unsigned long capacity = MAX_MMAP_SIZE;
+
+	while (height) {
+		capacity *= 1024;
+		height--;
+	}
+
+	return capacity;
+}
+
+static unsigned int calculate_new_height(off_t offset)
+{
+	unsigned int height = 0;
+	off_t temp_offset = offset / ((unsigned long)1024 * MAX_MMAP_SIZE);
+
+	while (temp_offset) {
+		temp_offset /= 1024;
+		height++;
+	}
+
+	return height;
+}
+
 static int nvp_get_mmap_address(struct NVFile *nvf, off_t offset, size_t count,
 		unsigned long *mmap_addr, size_t *extent_length, int wr_lock,
 		int cpuid)
 {
-	int ret;
+	int i;
+	int index;
+	unsigned int height = nvf->node->height;
+	unsigned int new_height;
+	unsigned long capacity = MAX_MMAP_SIZE;
+	unsigned long *root = nvf->node->root;
+	unsigned long start_addr;
+	off_t start_offset = offset;
 
-	if (offset >= nvf->node->maplength)
+	do {
+		capacity = calculate_capacity(height);
+		index = start_offset / capacity;
+		if (root[index] == 0)
+			goto not_found;
+		if (height)
+			root = (unsigned long *)root[index];
+		else
+			start_addr = root[index];
+		start_offset = start_offset % capacity;
+	} while(height--);
+
+	*mmap_addr = start_addr + offset % MAX_MMAP_SIZE;
+	*extent_length = MAX_MMAP_SIZE - (offset % MAX_MMAP_SIZE);
+
+	return 0;
+
+not_found:
+	if (offset >= ALIGN_MMAP_DOWN(nvf->node->length))
 		return 1;
 
-	*mmap_addr = (unsigned long)nvf->node->data + offset;
-	*extent_length = nvf->node->maplength - offset;
+	if (!wr_lock) {
+		NVP_UNLOCK_NODE_RD(nvf, cpuid);
+		NVP_LOCK_NODE_WR(nvf);
+	}
+
+	start_offset = ALIGN_MMAP_DOWN(offset);	
+	start_addr = (unsigned long) FSYNC_MMAP
+	(
+		NULL,
+		MAX_MMAP_SIZE,
+		PROT_WRITE, //max_perms,
+		MAP_SHARED | MAP_POPULATE,
+		nvf->fd, //fd_with_max_perms,
+		0
+	);
+
+	new_height = calculate_new_height(offset);
+	while (height < new_height) {
+		unsigned long old_root = (unsigned long)nvf->node->root;
+		nvf->node->root = malloc(1024 * sizeof(unsigned long));
+		for (i = 0; i < 1024; i++)
+			nvf->node->root[i] = 0;
+		nvf->node->root[0] = (unsigned long)old_root;
+	}
+
+	nvf->node->height = new_height;
+	height = new_height;
+
+	do {
+		capacity = calculate_capacity(height);
+		index = start_offset / capacity;
+		if (height) {
+			if (root[index] == 0) {
+				root[index] = (unsigned long)malloc(1024 *
+						sizeof(unsigned long));
+				root = (unsigned long *)root[index];
+				for (i = 0; i < 1024; i++)
+					root[i] = 0;
+			} else
+				root = (unsigned long *)root[index];
+		} else {
+			root[index] = start_addr;
+		}
+		start_offset = start_offset % capacity;
+	} while(height--);
+
+	*mmap_addr = start_addr + offset % MAX_MMAP_SIZE;
+	*extent_length = MAX_MMAP_SIZE - (offset % MAX_MMAP_SIZE);
+
+	if (!wr_lock) {
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_LOCK_NODE_RD(nvf, cpuid);
+	}
 
 	return 0;
 }
 
 
-RETT_PREAD _nvp_do_pread(INTF_PREAD)
+RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 {
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
@@ -1306,7 +1426,7 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD)
 
 	while (len_to_read > 0) {
 		ret = nvp_get_mmap_address(nvf, read_offset, read_count,
-					&mmap_addr, &extent_length, 0, 0);
+					&mmap_addr, &extent_length, wr_lock, cpuid);
 
 		DEBUG("Pread: get_mmap_address returned %d, length %llu\n",
 			ret, extent_length);
@@ -1353,7 +1473,7 @@ out:
 }
 
 
-RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
+RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
 	timing_type do_pwrite_time, memcpyw_time;
@@ -1503,7 +1623,7 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE)
 
 	while (len_to_write > 0) {
 		ret = nvp_get_mmap_address(nvf, write_offset, write_count,
-					&mmap_addr, &extent_length, 0, 0);
+					&mmap_addr, &extent_length, wr_lock, cpuid);
 
 		DEBUG("Pwrite: get_mmap_address returned %d, length %llu\n",
 					ret, extent_length);
@@ -1678,7 +1798,7 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 
 	DO_MSYNC(nvf);
 
-	assert(!munmap(nvf->node->data, nvf->node->maplength));
+//	assert(!munmap(nvf->node->data, nvf->node->maplength));
 
 	int result = _nvp_fileops->TRUNC64(CALL_TRUNC64);
 
@@ -1699,7 +1819,7 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 
 	MSG("Done with trunc, we better update map!\n");
 
-	_nvp_extend_map(nvf->fd, length);
+//	_nvp_extend_map(nvf->fd, length);
 
 	nvf->node->length = length;
 
