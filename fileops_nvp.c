@@ -1249,26 +1249,42 @@ static int nvp_get_mmap_address(struct NVFile *nvf, off_t offset, size_t count,
 	unsigned long start_addr;
 	off_t start_offset = offset;
 
+	DEBUG("Get mmap address: offset 0x%lx, height %u\n", offset, height);
+	DEBUG("root @ %p\n", root);
+
 	do {
 		capacity = calculate_capacity(height);
 		index = start_offset / capacity;
-		if (root[index] == 0)
+		DEBUG("index %d\n", index);
+		if (index >= 1024 || root[index] == 0)
 			goto not_found;
-		if (height)
+		if (height) {
 			root = (unsigned long *)root[index];
-		else
+			DEBUG("%p\n", root);
+		} else {
 			start_addr = root[index];
+			DEBUG("addr 0x%lx\n", start_addr);
+		}
 		start_offset = start_offset % capacity;
 	} while(height--);
 
 	*mmap_addr = start_addr + offset % MAX_MMAP_SIZE;
 	*extent_length = MAX_MMAP_SIZE - (offset % MAX_MMAP_SIZE);
 
+	DEBUG("Found: mmap addr 0x%lx, extent length %lu\n",
+			*mmap_addr, *extent_length);
+
 	return 0;
 
 not_found:
-	if (offset >= ALIGN_MMAP_DOWN(nvf->node->length))
+	DEBUG("Not found, perform mmap\n");
+
+	if (offset >= ALIGN_MMAP_DOWN(nvf->node->length)) {
+		DEBUG("File length smaller than offset: "
+			"length 0x%lx, offset 0x%lx\n",
+			nvf->node->length, offset);
 		return 1;
+	}
 
 	if (!wr_lock) {
 		NVP_UNLOCK_NODE_RD(nvf, cpuid);
@@ -1290,25 +1306,40 @@ not_found:
 	);
 	NVP_END_TIMING(mmap_t, mmap_time);
 
+	DEBUG("mmap offset 0x%lx, start_offset 0x%lx\n", offset, start_offset);
+
+	height = nvf->node->height;
 	new_height = calculate_new_height(offset);
-	while (height < new_height) {
-		unsigned long old_root = (unsigned long)nvf->node->root;
-		nvf->node->root = malloc(1024 * sizeof(unsigned long));
-		for (i = 0; i < 1024; i++)
-			nvf->node->root[i] = 0;
-		nvf->node->root[0] = (unsigned long)old_root;
+
+	if (height < new_height) {
+		MSG("Increase height from %u to %u\n", height, new_height);
+
+		while (height < new_height) {
+			unsigned long old_root = (unsigned long)nvf->node->root;
+			nvf->node->root = malloc(1024 * sizeof(unsigned long));
+			DEBUG("Malloc new root @ %p\n", nvf->node->root);
+			for (i = 0; i < 1024; i++)
+				nvf->node->root[i] = 0;
+			nvf->node->root[0] = (unsigned long)old_root;
+			DEBUG("Old root 0x%lx\n", nvf->node->root[0]);
+			height++;
+		}
+
+		nvf->node->height = new_height;
+		height = new_height;
 	}
 
-	nvf->node->height = new_height;
-	height = new_height;
-
+	root = nvf->node->root;
 	do {
 		capacity = calculate_capacity(height);
 		index = start_offset / capacity;
+		DEBUG("index %d\n", index);
 		if (height) {
 			if (root[index] == 0) {
 				root[index] = (unsigned long)malloc(1024 *
 						sizeof(unsigned long));
+				DEBUG("Malloc new leaf @%p, height %u, index %u\n",
+					root[index], height, index);
 				root = (unsigned long *)root[index];
 				for (i = 0; i < 1024; i++)
 					root[i] = 0;
@@ -1328,6 +1359,8 @@ not_found:
 		NVP_LOCK_NODE_RD(nvf, cpuid);
 	}
 
+	DEBUG("mmap addr 0x%lx, extent length %lu\n",
+			*mmap_addr, *extent_length);
 	return 0;
 }
 
