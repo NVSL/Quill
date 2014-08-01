@@ -1276,6 +1276,9 @@ not_found:
 	}
 
 	start_offset = ALIGN_MMAP_DOWN(offset);	
+	timing_type mmap_time;
+	NVP_START_TIMING(mmap_t, mmap_time);
+
 	start_addr = (unsigned long) FSYNC_MMAP
 	(
 		NULL,
@@ -1283,8 +1286,9 @@ not_found:
 		PROT_WRITE, //max_perms,
 		MAP_SHARED | MAP_POPULATE,
 		nvf->fd, //fd_with_max_perms,
-		0
+		start_offset
 	);
+	NVP_END_TIMING(mmap_t, mmap_time);
 
 	new_height = calculate_new_height(offset);
 	while (height < new_height) {
