@@ -1295,16 +1295,26 @@ not_found:
 	timing_type mmap_time;
 	NVP_START_TIMING(mmap_t, mmap_time);
 
+	int max_perms = ((nvf->canRead) ? PROT_READ : 0) | 
+			((nvf->canWrite) ? PROT_WRITE : 0);
 	start_addr = (unsigned long) FSYNC_MMAP
 	(
 		NULL,
 		MAX_MMAP_SIZE,
-		PROT_WRITE, //max_perms,
+		max_perms, //max_perms,
 		MAP_SHARED | MAP_POPULATE,
 		nvf->fd, //fd_with_max_perms,
 		start_offset
 	);
 	NVP_END_TIMING(mmap_t, mmap_time);
+
+	if (start_addr == MAP_FAILED || start_addr == NULL )
+	{
+		MSG("mmap failed for fd %i: %s\n", nvf->fd, strerror(errno));
+		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
+		nvf->posix = 1;
+		assert(0);
+	}
 
 	DEBUG("mmap offset 0x%lx, start_offset 0x%lx\n", offset, start_offset);
 
