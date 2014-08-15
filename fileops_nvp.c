@@ -101,6 +101,7 @@ struct NVFile* _nvp_fd_lookup;
 void _nvp_init2(void);
 int _nvp_extend_map(int file, size_t newlen);
 void _nvp_SIGBUS_handler(int sig);
+void _nvp_SIGUSR1_handler(int sig);
 void _nvp_test_invalidate_node(struct NVFile* nvf);
 
 RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like PWRITE, but without locks (called by _nvp_WRITE)
@@ -508,6 +509,12 @@ void nvp_exit_handler(void)
 	nvp_print_io_stats();
 }
 
+void _nvp_SIGUSR1_handler(int sig)
+{
+	nvp_print_time_stats();
+	nvp_print_io_stats();
+}
+
 void _nvp_init2(void)
 {
 	#if TIME_READ_MEMCPY
@@ -534,8 +541,10 @@ void _nvp_init2(void)
 	_nvp_wr_total    = 0;
 	#endif
 
-	DEBUG("Installing SIGBUS handler.\n");
+	DEBUG("Installing signal handler.\n");
 	signal(SIGBUS, _nvp_SIGBUS_handler);
+	/* For filebench */
+	signal(SIGUSR1, _nvp_SIGUSR1_handler);
 
 	//TODO
 	/*

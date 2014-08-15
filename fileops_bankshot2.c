@@ -65,6 +65,7 @@ void _bankshot2_init2(void);
 void _bankshot2_SIGBUS_handler(int sig);
 void _bankshot2_SIGINT_handler(int sig);
 void _bankshot2_SIGSEGV_handler(int sig);
+void _bankshot2_SIGUSR1_handler(int sig);
 void cache_write_back(struct NVFile *nvf);
 
 RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like PWRITE, but without locks (called by _bankshot2_WRITE)
@@ -478,6 +479,12 @@ unsigned int num_write_recheck;
 
 void bankshot2_exit_handler(void);
 
+void _bankshot2_SIGUSR1_handler(int sig)
+{
+	bankshot2_print_time_stats();
+	bankshot2_print_io_stats();
+}
+
 void bankshot2_setup_signal_handler(void)
 {
 	struct sigaction act, oact;
@@ -485,6 +492,7 @@ void bankshot2_setup_signal_handler(void)
 	act.sa_flags = SA_NODEFER;
 
 	sigaction(SIGSEGV, &act, &oact);
+	signal(SIGUSR1, _bankshot2_SIGUSR1_handler);
 }
 
 void _bankshot2_init2(void)
