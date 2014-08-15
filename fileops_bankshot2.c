@@ -481,8 +481,11 @@ void bankshot2_exit_handler(void);
 
 void _bankshot2_SIGUSR1_handler(int sig)
 {
+	MSG("SIGUSR1: print stats\n");
 	bankshot2_print_time_stats();
 	bankshot2_print_io_stats();
+	/* FIXME: Do we need to do this? */
+	bankshot2_clear_mappings();
 }
 
 void bankshot2_setup_signal_handler(void)
@@ -735,6 +738,7 @@ void bankshot2_print_io_stats(void)
 
 void bankshot2_exit_handler(void)
 {
+	MSG("Exit: print stats\n");
 	bankshot2_print_time_stats();
 	bankshot2_print_io_stats();
 	bankshot2_clear_mappings();

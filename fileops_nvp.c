@@ -505,12 +505,14 @@ void nvp_print_io_stats(void)
 
 void nvp_exit_handler(void)
 {
+	MSG("Exit: print stats\n");
 	nvp_print_time_stats();
 	nvp_print_io_stats();
 }
 
 void _nvp_SIGUSR1_handler(int sig)
 {
+	MSG("SIGUSR1: print stats\n");
 	nvp_print_time_stats();
 	nvp_print_io_stats();
 }
