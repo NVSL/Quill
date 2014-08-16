@@ -84,6 +84,58 @@ void bankshot2_cleanup_extent_tree(struct NVNode *node)
 	return;
 }
 
+static void bankshot2_free_btree(unsigned long *root, unsigned int height)
+{
+	int i;
+
+	if (height == 0)
+		return;
+
+	for (i = 0; i < 1024; i++) {
+		if (root[i]) {
+			bankshot2_free_btree((unsigned long *)root[i],
+						height - 1);
+			root[i] = 0;
+		}
+	}
+
+	free(root);
+	return;
+}
+
+void bankshot2_cleanup_extent_btree(struct NVNode *node)
+{
+	struct extent_cache_entry *curr;
+	struct rb_node *temp;
+	unsigned int height = node->height;
+	unsigned long *root;
+	int i;
+
+	temp = rb_first(&node->mmap_extent_tree);
+	while (temp) {
+		curr = container_of(temp, struct extent_cache_entry, node);
+		temp = rb_next(temp);
+		rb_erase(&curr->mmap_node, &node->mmap_extent_tree);
+		free(curr);
+	}
+
+	node->num_extents = 0;
+	root = node->root;
+
+	if (height) {
+		bankshot2_free_btree(root, height);
+	}
+
+	node->height = 0;
+	if (!node->root) {
+		node->root = malloc(1024 * sizeof(unsigned long));
+		for (i = 0; i < 1024; i++)
+			node->root[i] = 0;
+	}
+
+	return;
+}
+
 /* Find an extent in cache tree */
 /* Read lock of NVFile and NVNode must be held */
 /* offset, count and mmap_addr must be aligned to PAGE_SIZE */
