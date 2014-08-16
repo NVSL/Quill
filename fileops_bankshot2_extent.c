@@ -109,7 +109,6 @@ void bankshot2_cleanup_extent_btree(struct NVNode *node)
 	struct rb_node *temp;
 	unsigned int height = node->height;
 	unsigned long *root;
-	int i;
 
 	temp = rb_first(&node->mmap_extent_tree);
 	while (temp) {
@@ -122,16 +121,11 @@ void bankshot2_cleanup_extent_btree(struct NVNode *node)
 	node->num_extents = 0;
 	root = node->root;
 
-	if (height) {
-		bankshot2_free_btree(root, height);
-	}
+	bankshot2_free_btree(root, height);
 
 	node->height = 0;
-	if (!node->root) {
-		node->root = malloc(1024 * sizeof(unsigned long));
-		for (i = 0; i < 1024; i++)
-			node->root[i] = 0;
-	}
+	free(node->root);
+	node->root = NULL;
 
 	return;
 }

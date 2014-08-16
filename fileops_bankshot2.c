@@ -67,6 +67,8 @@ void _bankshot2_SIGINT_handler(int sig);
 void _bankshot2_SIGSEGV_handler(int sig);
 void _bankshot2_SIGUSR1_handler(int sig);
 void cache_write_back(struct NVFile *nvf);
+void bankshot2_clear_mappings(void);
+void bankshot2_print_io_stats(void);
 
 RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like PWRITE, but without locks (called by _bankshot2_WRITE)
 RETT_PWRITE _bankshot2_do_pread (INTF_PREAD, int cpuid); // like PREAD , but without locks (called by _bankshot2_READ )
@@ -639,6 +641,26 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	return nvf->cache_serialno;
 }
 
+void bankshot2_cleanup_node(struct NVNode *node)
+{
+#if USE_BTREE
+	bankshot2_cleanup_extent_btree(node);
+#else
+	bankshot2_cleanup_extent_tree(node);
+#endif
+}
+
+void bankshot2_init_node(struct NVNode *node)
+{
+#if USE_BTREE
+	int i;
+
+	node->root = malloc(1024 * sizeof(unsigned long));
+	for (i = 0; i < 1024; i++)
+		node->root[i] = 0;
+#endif
+}
+
 void bankshot2_clear_mappings(void)
 {
 	struct NVFile *nvf;
@@ -664,7 +686,7 @@ void bankshot2_clear_mappings(void)
 
 	for (i = 0; i < OPEN_MAX; i++) {
 		node = &_bankshot2_node_lookup[i];
-		bankshot2_cleanup_extent_tree(node);
+		bankshot2_cleanup_node(node);
 	}
 
 	pthread_spin_unlock(&node_lookup_lock);
@@ -755,7 +777,8 @@ struct NVNode * bankshot2_allocate_node(void)
 		if(_bankshot2_node_lookup[i].serialno == 0) {
 			node = &_bankshot2_node_lookup[i];
 			DEBUG("Allocating unused NVNode %d\n", i);
-			bankshot2_cleanup_extent_tree(node);
+			bankshot2_cleanup_node(node);
+			bankshot2_init_node(node);
 			break;
 		}
 	}
@@ -769,7 +792,8 @@ struct NVNode * bankshot2_allocate_node(void)
 		if(_bankshot2_node_lookup[i].reference == 0) {
 			node = &_bankshot2_node_lookup[i];
 			DEBUG("Allocating unreferenced NVNode %d\n", i);
-			bankshot2_cleanup_extent_tree(node);
+			bankshot2_cleanup_node(node);
+			bankshot2_init_node(node);
 			break;
 		}
 	}
@@ -1619,8 +1643,13 @@ int bankshot2_get_extent(struct NVFile *nvf,
 	cached_extent_offset = extent_info->offset;
 
 	BANKSHOT2_START_TIMING(lookup_t, lookup_time);
-	feret = find_extent(nvf, &cached_extent_offset, &cached_extent_length,
-					&cached_extent_start);
+#if USE_BTREE
+	feret = find_extent_btree(nvf, &cached_extent_offset,
+			&cached_extent_length, &cached_extent_start);
+#else
+	feret = find_extent(nvf, &cached_extent_offset,
+			&cached_extent_length, &cached_extent_start);
+#endif
 	BANKSHOT2_END_TIMING(lookup_t, lookup_time);
 
 	extent_info->file_length = nvf->node->length;
@@ -1730,8 +1759,13 @@ int bankshot2_get_extent(struct NVFile *nvf,
 				nvf->cache_serialno, data.mmap_offset,
 				data.mmap_addr,	data.mmap_length,
 				data.required);
+#if USE_BTREE
+			add_extent_btree(nvf, data.mmap_offset,
+				data.mmap_length, data.write, data.mmap_addr);
+#else
 			add_extent(nvf, data.mmap_offset,
 				data.mmap_length, data.write, data.mmap_addr);
+#endif
 			if (data.mmap_offset + data.mmap_length < offset ||
 				offset + request_len <= data.mmap_offset)
 				MSG("Add extent not overlap: cache fd %llu, "
@@ -2013,7 +2047,11 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 			nvf->node->num_read_segfaults++;
 			NVP_UNLOCK_NODE_RD(nvf, cpuid);
 			NVP_LOCK_NODE_WR(nvf);
+#if USE_BTREE
+			remove_extent_btree(nvf, read_offset);
+#else
 			remove_extent(nvf, read_offset);
+#endif
 			NVP_UNLOCK_NODE_WR(nvf);
 			NVP_LOCK_NODE_RD(nvf, cpuid);
 			do_pread_memcpy = 0;
@@ -2301,7 +2339,11 @@ do_pwrite:
 				NVP_UNLOCK_NODE_RD(nvf, cpuid);
 				NVP_LOCK_NODE_WR(nvf);
 			}
+#if USE_BTREE
+			remove_extent_btree(nvf, write_offset);
+#else
 			remove_extent(nvf, write_offset);
+#endif
 			if (!wr_lock) {
 				NVP_UNLOCK_NODE_WR(nvf);
 				NVP_LOCK_NODE_RD(nvf, cpuid);
