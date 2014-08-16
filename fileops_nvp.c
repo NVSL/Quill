@@ -413,6 +413,8 @@ enum timing_category {
 	do_pwrite_t,
 	memcpyr_t,
 	memcpyw_t,
+	lookup_t,
+	insert_t,
 	read_t,
 	write_t,
 	pread_t,
@@ -431,6 +433,8 @@ const char *Timingstring[TIMING_NUM] =
 	"do_pwrite",
 	"memcpy_read",
 	"memcpy_write",
+	"Tree_lookup",
+	"Tree_insert",
 	"READ",
 	"WRITE",
 	"PREAD",
@@ -1259,16 +1263,20 @@ static int nvp_get_mmap_address(struct NVFile *nvf, off_t offset, size_t count,
 	unsigned long *root = nvf->node->root;
 	unsigned long start_addr;
 	off_t start_offset = offset;
+	timing_type mmap_time, lookup_time, insert_time;
 
 	DEBUG("Get mmap address: offset 0x%lx, height %u\n", offset, height);
 	DEBUG("root @ %p\n", root);
 
+	NVP_START_TIMING(lookup_t, lookup_time);
 	do {
 		capacity = calculate_capacity(height);
 		index = start_offset / capacity;
 		DEBUG("index %d\n", index);
-		if (index >= 1024 || root[index] == 0)
+		if (index >= 1024 || root[index] == 0) {
+			NVP_END_TIMING(lookup_t, lookup_time);
 			goto not_found;
+		}
 		if (height) {
 			root = (unsigned long *)root[index];
 			DEBUG("%p\n", root);
@@ -1278,6 +1286,7 @@ static int nvp_get_mmap_address(struct NVFile *nvf, off_t offset, size_t count,
 		}
 		start_offset = start_offset % capacity;
 	} while(height--);
+	NVP_END_TIMING(lookup_t, lookup_time);
 
 	*mmap_addr = start_addr + offset % MAX_MMAP_SIZE;
 	*extent_length = MAX_MMAP_SIZE - (offset % MAX_MMAP_SIZE);
@@ -1303,7 +1312,6 @@ not_found:
 	}
 
 	start_offset = ALIGN_MMAP_DOWN(offset);	
-	timing_type mmap_time;
 	NVP_START_TIMING(mmap_t, mmap_time);
 
 	int max_perms = ((nvf->canRead) ? PROT_READ : 0) | 
@@ -1332,6 +1340,7 @@ not_found:
 	height = nvf->node->height;
 	new_height = calculate_new_height(offset);
 
+	NVP_START_TIMING(insert_t, insert_time);
 	if (height < new_height) {
 		MSG("Increase height from %u to %u\n", height, new_height);
 
@@ -1371,6 +1380,7 @@ not_found:
 		}
 		start_offset = start_offset % capacity;
 	} while(height--);
+	NVP_END_TIMING(insert_t, insert_time);
 
 	*mmap_addr = start_addr + offset % MAX_MMAP_SIZE;
 	*extent_length = MAX_MMAP_SIZE - (offset % MAX_MMAP_SIZE);
