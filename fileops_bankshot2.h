@@ -84,6 +84,8 @@ struct NVNode
 {
 	struct rb_root extent_tree;
 	struct rb_root mmap_extent_tree;
+	unsigned long *root;
+	unsigned int height;
 	int reference;	// How many fds refered this node
 	int num_extents;
 	ino_t serialno;

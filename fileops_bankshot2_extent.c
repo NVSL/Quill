@@ -118,6 +118,48 @@ found:
 	return 1;
 }
 
+static unsigned long calculate_capacity(unsigned int height)
+{
+	unsigned long capacity = MAX_MMAP_SIZE;
+
+	while(height) {
+		capacity *= 1024;
+		height--;
+	}
+
+	return capacity;
+}
+
+int find_extent_btree(struct NVFile *nvf, off_t *offset, size_t *count,
+			unsigned long *mmap_addr)
+{
+	struct NVNode *node = nvf->node;
+	unsigned int height = node->height;
+	unsigned long capacity = MAX_MMAP_SIZE;
+	unsigned long start_addr;
+	unsigned long *root = node->root;
+	off_t start_offset = *offset;
+	int index;
+
+	do {
+		capacity = calculate_capacity(height);
+		index = start_offset / capacity;
+		if (index >= 1024 || root[index] == 0)
+			return 0;
+		if (height)
+			root = (unsigned long *)root[index];
+		else
+			start_addr = root[index];
+		start_offset = start_offset % capacity;
+	} while (height--);
+
+	*mmap_addr = start_addr;
+	*offset = ALIGN_DOWN(*offset);
+	*count = MAX_MMAP_SIZE;
+
+	return 1;
+}
+
 /* Add an extent to cache tree */
 /* Must hold Write lock of NVNode */
 /* offset, count and mmap_addr must be aligned to PAGE_SIZE */
@@ -320,6 +362,188 @@ overlap_check:
 	return;
 }
 
+static unsigned int calculate_new_height(off_t offset)
+{
+	unsigned int height = 0;
+	off_t temp_offset = offset / ((unsigned long)1024 * MAX_MMAP_SIZE);
+
+	while (temp_offset) {
+		temp_offset /= 1024;
+		height++;
+	}
+
+	return height;
+}
+
+void add_extent_btree(struct NVFile *nvf, off_t offset, size_t length,
+		int write, unsigned long mmap_addr)
+{
+	struct NVNode *node = nvf->node;
+	struct extent_cache_entry *curr, *new, *next;
+	struct rb_node **temp, *parent, *next_node;
+	off_t extent_offset;
+	size_t extent_length;
+	unsigned long extent_mmap_addr;
+	unsigned int height = node->height;
+	unsigned int new_height;
+	unsigned long capacity = MAX_MMAP_SIZE;
+	unsigned long *root = node->root;
+	off_t start_offset = offset;
+	int compVal, i, index;
+
+	/* Offset and length must be aligned to PAGE_SIZE */
+	if (offset != ALIGN_DOWN(offset) || length != ALIGN_DOWN(length)) {
+		ERROR("%s: offset or length not aligned to mmap unit size! "
+			"offset 0x%lx, length %lu\n", offset, length);
+		assert(0);
+	}
+
+	if (length > MAX_MMAP_SIZE) {
+		ERROR("%s: length larger than 2MB! length %lu\n", length);
+		assert(0);
+	}
+
+	DEBUG("Add extent offset 0x%lx, length %lu\n", offset, length);
+
+	extent_offset = offset;
+	extent_length = length;
+	extent_mmap_addr = mmap_addr;
+
+	height = node->height;
+	new_height = calculate_new_height(offset);
+
+	if (height < new_height) {
+		MSG("Increase height from %u to %u\n", height, new_height);
+
+		while (height < new_height) {
+			unsigned long old_root = (unsigned long)node->root;
+			node->root = malloc(1024 * sizeof(unsigned long));
+			for (i = 0; i < 1024; i++)
+				node->root[i] = 0;
+			node->root[0] = (unsigned long)old_root;
+			height++;
+		}
+
+		node->height = new_height;
+		height = new_height;
+	}
+
+	root = node->root;
+	do {
+		capacity = calculate_capacity(height);
+		index = start_offset / capacity;
+		if (height) {
+			if (root[index] == 0) {
+				root[index] = (unsigned long)malloc(1024 *
+						sizeof(unsigned long));
+				root = (unsigned long *)root[index];
+				for (i = 0; i < 1024; i++)
+					root[i] = 0;
+			} else
+				root = (unsigned long *)root[index];
+		} else {
+			if (root[index] == extent_mmap_addr)
+				return;
+			root[index] = extent_mmap_addr;
+		}
+		start_offset = start_offset % capacity;
+	} while (height--);
+
+	new = malloc(sizeof(struct extent_cache_entry));
+	if (!new)
+		assert(0);
+
+	new->offset = extent_offset;
+	new->count = extent_length;
+	new->dirty = write;
+	new->mmap_addr = extent_mmap_addr;
+
+	/*
+	 * Now insert to the mmap rbtree.
+	 * If find the existing mmap_addr but not the same offset,
+	 * it means the old mapping needs to be removed, as two different
+	 * offset cannot have the same mmap address.
+	 */
+	temp = &(node->mmap_extent_tree.rb_node);
+	parent = NULL;
+
+	while (*temp) {
+		curr = container_of(*temp, struct extent_cache_entry,
+					mmap_node);
+		compVal = mmap_rbtree_compare_find(curr, extent_mmap_addr);
+
+		if (compVal == -1) {
+			temp = &((*temp)->rb_left);
+		} else if (compVal == 1) {
+			temp = &((*temp)->rb_right);
+		} else {
+			/* Found existing extent */
+			if (extent_offset != curr->offset) {
+//					&& extent_mmap_addr == curr->mmap_addr) {
+				DEBUG("Remove extent: start offset 0x%llx, "
+					"mmap_addr 0x%llx, length %llu\n",
+					curr->offset, curr->mmap_addr,
+					curr->count);
+				rb_erase(&curr->mmap_node,
+						&node->mmap_extent_tree);
+				free(curr);
+				node->num_extents--;
+			}
+			break;
+		}
+	}
+
+	temp = &(node->mmap_extent_tree.rb_node);
+	parent = NULL;
+
+	while (*temp) {
+		curr = container_of(*temp, struct extent_cache_entry,
+					mmap_node);
+		compVal = mmap_rbtree_compare_find(curr, extent_mmap_addr);
+
+		parent = *temp;
+
+		if (compVal == -1) {
+			temp = &((*temp)->rb_left);
+		} else if (compVal == 1) {
+			temp = &((*temp)->rb_right);
+		} else {
+			ERROR("%s: Existing extent with same mmap address: "
+				"insert offset 0x%lx, length %lu, "
+				"mmap_addr 0x%lx, existing offset "
+				"0x%lx, length %lu, mmap_addr 0x%lx\n",
+				__func__, extent_offset, extent_length,
+				extent_mmap_addr, curr->offset,
+				curr->count, curr->mmap_addr);
+//			assert(0);
+			bankshot2_print_extent_tree(node);
+		}
+	}
+
+	rb_link_node(&new->mmap_node, parent, temp);
+	rb_insert_color(&new->mmap_node, &node->mmap_extent_tree);
+
+	node->num_extents++;
+
+	next_node = rb_next(&new->mmap_node);
+	if (next_node) {
+		next = container_of(next_node,
+				struct extent_cache_entry, mmap_node);
+		if (new->mmap_addr + new->count > next->mmap_addr) {
+			ERROR("%s: insert extent mmap overlaps "
+				"with existing extent: insert offset 0x%lx, "
+				"length %lu, mmap_addr 0x%lx, existing offset "
+				"0x%lx, length %lu, mmap_addr 0x%lx\n",
+				__func__, extent_offset, extent_length,
+				extent_mmap_addr, next->offset, next->count,
+				next->mmap_addr);
+			new->count = next->mmap_addr - new->mmap_addr;
+		}
+	}
+
+	return;
+}
+
 void remove_extent(struct NVFile *nvf, off_t offset)
 {
 	struct NVNode *node = nvf->node;
@@ -344,6 +568,61 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 				curr->offset, curr->mmap_addr,
 				curr->count);
 			rb_erase(&curr->node, &node->extent_tree);
+			rb_erase(&curr->mmap_node, &node->mmap_extent_tree);
+			free(curr);
+			node->num_extents--;
+			removed = 1;
+			break;
+		}
+	}
+
+	if (removed == 0)
+		ERROR("Remove extent failed: offset 0x%llx not found\n",
+				offset);
+	return;
+}
+
+void remove_extent_btree(struct NVFile *nvf, off_t offset)
+{
+	struct NVNode *node = nvf->node;
+	struct extent_cache_entry *curr;
+	struct rb_node *temp;
+	unsigned int height = node->height;
+	unsigned long capacity = MAX_MMAP_SIZE;
+	unsigned long *root = node->root;
+	off_t start_offset = offset;
+	int compVal, index;
+	int removed = 0;
+
+	MSG("Remove extent offset 0x%lx\n", offset);
+	do {
+		capacity = calculate_capacity(height);
+		index = start_offset / capacity;
+		if (index >= 1024 || root[index] == 0) {
+			ERROR("Remove extent 0x%lx not found\n", offset);
+			assert(0);
+		}
+		if (height)
+			root = (unsigned long *)root[index];
+		else
+			root[index] = 0;
+		start_offset = start_offset % capacity;
+	} while (height--);
+
+	temp = node->mmap_extent_tree.rb_node;
+	while (temp) {
+		curr = container_of(temp, struct extent_cache_entry, node);
+		compVal = extent_rbtree_compare_find(curr, offset);
+
+		if (compVal == -1) {
+			temp = temp->rb_left;
+		} else if (compVal == 1) {
+			temp = temp->rb_right;
+		} else {
+			MSG("Remove extent succeed: start offset 0x%llx, "
+				"mmap_addr 0x%llx, length %llu\n",
+				curr->offset, curr->mmap_addr,
+				curr->count);
 			rb_erase(&curr->mmap_node, &node->mmap_extent_tree);
 			free(curr);
 			node->num_extents--;
