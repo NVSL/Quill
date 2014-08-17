@@ -112,7 +112,7 @@ void bankshot2_cleanup_extent_btree(struct NVNode *node)
 
 	temp = rb_first(&node->mmap_extent_tree);
 	while (temp) {
-		curr = container_of(temp, struct extent_cache_entry, node);
+		curr = container_of(temp, struct extent_cache_entry, mmap_node);
 		temp = rb_next(temp);
 		rb_erase(&curr->mmap_node, &node->mmap_extent_tree);
 		free(curr);
@@ -121,12 +121,15 @@ void bankshot2_cleanup_extent_btree(struct NVNode *node)
 	node->num_extents = 0;
 	root = node->root;
 
+	DEBUG("Cleanup node btree @ %p, height %u\n", root, height);
 	bankshot2_free_btree(root, height);
 
 	node->height = 0;
-	free(node->root);
+	if (node->root)
+		free(node->root);
 	node->root = NULL;
 
+	DEBUG("Cleanup node btree return\n");
 	return;
 }
 
