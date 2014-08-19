@@ -1661,6 +1661,10 @@ int bankshot2_get_extent(struct NVFile *nvf,
 				(offset - cached_extent_offset);
 		extent_info->mmap_offset = cached_extent_offset;
 		extent_info->mmap_length = cached_extent_length;
+		DEBUG("offset 0x%lx ,mmap addr 0x%llx, extent_length %lu, "
+			"mmap offset 0x%lx, mmap_length %lu\n", offset,
+			extent_info->mmap_addr,	extent_info->extent_length,
+			extent_info->mmap_offset, extent_info->mmap_length);
 		return 0;
 	}
 

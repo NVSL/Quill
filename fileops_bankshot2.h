@@ -63,6 +63,7 @@
 #define ALIGN_DOWN(addr) ((addr) & ~(MMAP_UNIT - 1))
 #define ALIGN_UP(addr) (((addr) & (MMAP_UNIT - 1)) ? \
 		(ALIGN_DOWN(addr + MMAP_UNIT)) : (addr))
+#define ALIGN_DOWN_MMAP(addr) ((addr) & ~(MAX_MMAP_SIZE - 1))
 
 struct NVFile
 {

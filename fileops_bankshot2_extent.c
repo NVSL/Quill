@@ -203,7 +203,7 @@ int find_extent_btree(struct NVFile *nvf, off_t *offset, size_t *count,
 	} while (height--);
 
 	*mmap_addr = start_addr;
-	*offset = ALIGN_DOWN(*offset);
+	*offset = ALIGN_DOWN_MMAP(*offset);
 	*count = MAX_MMAP_SIZE;
 
 	return 1;
