@@ -88,6 +88,7 @@ static void bankshot2_free_btree(unsigned long *root, unsigned int height)
 {
 	int i;
 
+	DEBUG("Enter: root %p, height %u\n", root, height);
 	if (height == 0)
 		return;
 
@@ -99,6 +100,7 @@ static void bankshot2_free_btree(unsigned long *root, unsigned int height)
 		}
 	}
 
+	DEBUG("Free %p @ height %u\n", root, height);
 	free(root);
 	return;
 }
@@ -125,8 +127,10 @@ void bankshot2_cleanup_extent_btree(struct NVNode *node)
 	bankshot2_free_btree(root, height);
 
 	node->height = 0;
-	if (node->root)
+	if (node->root && height == 0) {
+		DEBUG("Free root %p @ height %u\n", root, height);
 		free(node->root);
+	}
 	node->root = NULL;
 
 	DEBUG("Cleanup node btree return\n");
