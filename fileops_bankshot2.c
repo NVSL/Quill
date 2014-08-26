@@ -2052,7 +2052,7 @@ RETT_PREAD _bankshot2_do_pread(INTF_PREAD, int cpuid)
 			NVP_UNLOCK_NODE_RD(nvf, cpuid);
 			NVP_LOCK_NODE_WR(nvf);
 #if USE_BTREE
-			remove_extent_btree(nvf, read_offset);
+			remove_extent_btree(nvf, read_offset, 0);
 #else
 			remove_extent(nvf, read_offset);
 #endif
@@ -2344,7 +2344,7 @@ do_pwrite:
 				NVP_LOCK_NODE_WR(nvf);
 			}
 #if USE_BTREE
-			remove_extent_btree(nvf, write_offset);
+			remove_extent_btree(nvf, write_offset, 0);
 #else
 			remove_extent(nvf, write_offset);
 #endif

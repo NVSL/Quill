@@ -537,6 +537,7 @@ void add_extent_btree(struct NVFile *nvf, off_t offset, size_t length,
 					"mmap_addr 0x%llx, length %llu\n",
 					curr->offset, curr->mmap_addr,
 					curr->count);
+				remove_extent_btree(nvf, curr->offset, 1);
 				rb_erase(&curr->mmap_node,
 						&node->mmap_extent_tree);
 				free(curr);
@@ -635,7 +636,7 @@ void remove_extent(struct NVFile *nvf, off_t offset)
 	return;
 }
 
-void remove_extent_btree(struct NVFile *nvf, off_t offset)
+void remove_extent_btree(struct NVFile *nvf, off_t offset, int btree_only)
 {
 	struct NVNode *node = nvf->node;
 	struct extent_cache_entry *curr;
@@ -661,6 +662,9 @@ void remove_extent_btree(struct NVFile *nvf, off_t offset)
 			root[index] = 0;
 		start_offset = start_offset % capacity;
 	} while (height--);
+
+	if (btree_only)
+		return;
 
 	temp = node->mmap_extent_tree.rb_node;
 	while (temp) {

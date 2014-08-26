@@ -164,7 +164,7 @@ int first_extent(struct NVFile *nvf, off_t *offset, size_t *count, int *dirty,
 
 int find_extent_btree(struct NVFile *nvf, off_t *offset, size_t *count,
 			unsigned long *mmap_addr);
-void remove_extent_btree(struct NVFile *nvf, off_t offset);
+void remove_extent_btree(struct NVFile *nvf, off_t offset, int btree_only);
 void add_extent_btree(struct NVFile *nvf, off_t offset, size_t count, int write,
 			unsigned long mmap_addr);
 void bankshot2_cleanup_extent_btree(struct NVNode *node);
