@@ -22,6 +22,8 @@
 #include "nvp_lock.h"
 #include "rbtree.h"
 
+#include "../../bankshot2/kernel/bankshot2_cache.h"
+
 #define ENV_NV_FOP "NVP_NV_FOP"
 
 
@@ -55,15 +57,7 @@
 	} }while(0)
 
 /* Default mmap size : PAGE_SIZE */
-
 #define PAGE_SIZE	4096
-#define MMAP_UNIT	PAGE_SIZE
-#define MAX_MMAP_SIZE	2097152
-
-#define ALIGN_DOWN(addr) ((addr) & ~(MMAP_UNIT - 1))
-#define ALIGN_UP(addr) (((addr) & (MMAP_UNIT - 1)) ? \
-		(ALIGN_DOWN(addr + MMAP_UNIT)) : (addr))
-#define ALIGN_DOWN_MMAP(addr) ((addr) & ~(MAX_MMAP_SIZE - 1))
 
 struct NVFile
 {

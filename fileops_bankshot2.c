@@ -1,7 +1,6 @@
 // a module which repalces the standart POSIX functions with memory mapped equivalents
 
 #include "fileops_bankshot2.h"
-#include "../../bankshot2/kernel/bankshot2_cache.h"
 
 //#include "my_memcpy_nocache.h"
 
