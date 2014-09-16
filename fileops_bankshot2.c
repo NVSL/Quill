@@ -2194,7 +2194,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 //					count, offset);
 
 #if ENABLE_FALLOC
-		if (extension <= 32768)
+		if (extension < 32768)
 			goto do_pwrite;
 
 		timing_type falloc_time;
