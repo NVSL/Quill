@@ -571,6 +571,7 @@ void add_extent_btree(struct NVFile *nvf, off_t offset, size_t length,
 				curr->count, curr->mmap_addr);
 //			assert(0);
 			bankshot2_print_extent_tree(node);
+			goto check_overlap;
 		}
 	}
 
@@ -579,6 +580,7 @@ void add_extent_btree(struct NVFile *nvf, off_t offset, size_t length,
 
 	node->num_extents++;
 
+check_overlap:
 	next_node = rb_next(&new->mmap_node);
 	if (next_node) {
 		next = container_of(next_node,

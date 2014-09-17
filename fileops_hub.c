@@ -500,7 +500,7 @@ RETT_OPEN _hub_OPEN(INTF_OPEN)
 {
 	CHECK_RESOLVE_FILEOPS(_hub_);
 
-	DEBUG("CALL: _hub_OPEN\n");
+	DEBUG("CALL: _hub_OPEN for %s\n", path);
 	
 	struct Fileops_p* op_to_use = NULL;
 
