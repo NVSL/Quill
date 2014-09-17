@@ -424,6 +424,7 @@ enum timing_category {
 	open_t,
 	close_t,
 	get_node_t,
+	alloc_node_t,
 	fsync_t,
 	fdsync_t,
 	mmap_t,
@@ -447,6 +448,7 @@ const char *Timingstring[TIMING_NUM] =
 	"OPEN",
 	"CLOSE",
 	"get_node",
+	"alloc_node",
 	"Fsync",
 	"Fdsync",
 	"mmap",
@@ -652,6 +654,8 @@ struct NVNode * nvp_allocate_node(void)
 {
 	struct NVNode *node = NULL;
 	int i, candidate = -1;
+	timing_type alloc_node_time;
+	NVP_START_TIMING(alloc_node_t, alloc_node_time);
 
 	for (i = 0; i < OPEN_MAX; i++) {
 		if (_nvp_node_lookup[i].serialno == 0) {
@@ -665,16 +669,20 @@ struct NVNode * nvp_allocate_node(void)
 			candidate = i;
 	}
 
-	if (node)
+	if (node) {
+		NVP_END_TIMING(alloc_node_t, alloc_node_time);
 		return node;
+	}
 
 	if (candidate != -1) {
 		node = &_nvp_node_lookup[candidate];
 		nvp_cleanup_node(node);
 		nvp_init_node(node);
+		NVP_END_TIMING(alloc_node_t, alloc_node_time);
 		return node;
 	}
 
+	NVP_END_TIMING(alloc_node_t, alloc_node_time);
 	return NULL;
 	
 }
@@ -1053,6 +1061,9 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 		nvf->valid = 0;
 		nvf->posix = 0;
 		nvf->node->reference--;
+		if (nvf->node->reference == 0)
+			nvf->node->serialno = 0;
+//		nvf->node = NULL;
 		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
 		result = _nvp_fileops->CLOSE(CALL_CLOSE);
 		NVP_END_TIMING(close_t, close_time);
@@ -1066,6 +1077,9 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 
 	nvf->valid = 0;
 	nvf->node->reference--;
+	if (nvf->node->reference == 0)
+		nvf->node->serialno = 0;
+//	nvf->node = NULL;
 
 	//_nvp_test_invalidate_node(nvf);
 
