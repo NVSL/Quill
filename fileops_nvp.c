@@ -92,11 +92,13 @@ struct NVNode
 	volatile size_t maplength;
 	unsigned long *root;
 	unsigned int height;
+	int reference;
 //	volatile int maxPerms;
 //	volatile int valid; // for debugging purposes
 };
 
 struct NVFile* _nvp_fd_lookup;
+struct NVNode* _nvp_node_lookup;
 
 void _nvp_init2(void);
 int _nvp_extend_map(int file, size_t newlen);
@@ -513,11 +515,26 @@ void nvp_print_io_stats(void)
 		num_write ? write_size / num_write : 0);
 }
 
+void nvp_cleanup_node(struct NVNode *node);
+
+void nvp_cleanup(void)
+{
+	int i;
+
+	free(_nvp_fd_lookup);
+
+	for (i = 0; i< OPEN_MAX; i++)
+		nvp_cleanup_node(&_nvp_node_lookup[i]);
+
+	free(_nvp_node_lookup);
+}
+
 void nvp_exit_handler(void)
 {
 	MSG("Exit: print stats\n");
 	nvp_print_time_stats();
 	nvp_print_io_stats();
+	nvp_cleanup();
 }
 
 void _nvp_SIGUSR1_handler(int sig)
@@ -543,6 +560,13 @@ void _nvp_init2(void)
 	for(i=0; i<OPEN_MAX; i++) {
 		_nvp_fd_lookup[i].valid = 0;
 		NVP_LOCK_INIT(_nvp_fd_lookup[i].lock);
+	}
+
+	_nvp_node_lookup = (struct NVNode*) calloc(OPEN_MAX, sizeof(struct NVNode));
+	memset(_nvp_node_lookup, 0, OPEN_MAX * sizeof(struct NVNode));
+
+	for(i = 0; i < OPEN_MAX; i++) {
+		NVP_LOCK_INIT(_nvp_node_lookup[i].lock);
 	}
 
 	MMAP_PAGE_SIZE = getpagesize();
@@ -582,6 +606,79 @@ void _nvp_print_extend_stats(void)
 }
 #endif
 
+void nvp_free_btree(unsigned long *root, unsigned long height)
+{
+	int i;
+
+	if (height == 0) return;
+
+	for (i = 0; i < 1024; i++) {
+		if (root[i]) {
+			nvp_free_btree((unsigned long *)root[i],
+					height - 1);
+			root[i] = 0;
+		}
+	}
+
+	free(root);
+}
+
+void nvp_cleanup_node(struct NVNode *node)
+{
+	unsigned int height = node->height;
+	unsigned long *root = node->root;
+
+	nvp_free_btree(root, height);
+
+	node->height = 0;
+	if (node->root && height == 0)
+		free(node->root);
+
+	node->root = NULL;
+}
+
+void nvp_init_node(struct NVNode *node)
+{
+	int i;
+
+	if (!node->root)
+		node->root = malloc(1024 * sizeof(unsigned long));
+
+	for (i = 0; i < 1024; i++)
+		node->root[i] = 0;
+}
+
+struct NVNode * nvp_allocate_node(void)
+{
+	struct NVNode *node = NULL;
+	int i, candidate = -1;
+
+	for (i = 0; i < OPEN_MAX; i++) {
+		if (_nvp_node_lookup[i].serialno == 0) {
+			node = &_nvp_node_lookup[i];
+			nvp_cleanup_node(node);
+			nvp_init_node(node);
+			break;
+		}
+
+		if (candidate == -1 && _nvp_node_lookup[i].reference == 0)
+			candidate = i;
+	}
+
+	if (node)
+		return node;
+
+	if (candidate != -1) {
+		node = &_nvp_node_lookup[candidate];
+		nvp_cleanup_node(node);
+		nvp_init_node(node);
+		return node;
+	}
+
+	return NULL;
+	
+}
+
 struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 {
 	int i;
@@ -589,7 +686,7 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 	timing_type get_node_time;
 	NVP_START_TIMING(get_node_t, get_node_time);
 
-	for(i=0; i < OPEN_MAX; i++)
+	for(i = 0; i < OPEN_MAX; i++)
 	{
 		if( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st->st_ino) {
 			DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
@@ -605,18 +702,15 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 	}
 	if(node == NULL) {
 		DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
-		node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
-		memset(node, 0, sizeof(struct NVNode));
-		NVP_LOCK_INIT(node->lock);
+		node = nvp_allocate_node();
+		assert(node);
 		node->length = file_st->st_size;
 		node->maplength = 0;
 		node->serialno = file_st->st_ino;
 		node->data = NULL;
 		node->height = 0;
-		node->root = malloc(1024 * sizeof(unsigned long));
-		for (i = 0; i < 1024; i++)
-			node->root[i] = 0;
 	}
+	node->reference++;
 
 	NVP_END_TIMING(get_node_t, get_node_time);
 	return node;
@@ -957,6 +1051,8 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 
 	if (nvf->posix) {
 		nvf->valid = 0;
+		nvf->posix = 0;
+		nvf->node->reference--;
 		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
 		result = _nvp_fileops->CLOSE(CALL_CLOSE);
 		NVP_END_TIMING(close_t, close_time);
@@ -969,6 +1065,7 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 	NVP_LOCK_NODE_WR(nvf);
 
 	nvf->valid = 0;
+	nvf->node->reference--;
 
 	//_nvp_test_invalidate_node(nvf);
 
