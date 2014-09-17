@@ -580,6 +580,43 @@ void _nvp_print_extend_stats(void)
 }
 #endif
 
+struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
+{
+	int i;
+	struct NVNode *node = NULL;
+
+	for(i=0; i < OPEN_MAX; i++)
+	{
+		if( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st->st_ino) {
+			DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
+			node = _nvp_fd_lookup[i].node;
+			SANITYCHECK(node != NULL);
+			// when sharing nodes it's good to msync in case of multithreading // TODO is this true?
+			if(msync(node->data, node->maplength, MS_SYNC|MS_INVALIDATE)) {
+				ERROR("Failed to msync for path %s\n", path);
+				assert(0);
+			}
+			break;
+		}
+	}
+	if(node == NULL) {
+		DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
+		node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
+		memset(node, 0, sizeof(struct NVNode));
+		NVP_LOCK_INIT(node->lock);
+		node->length = file_st->st_size;
+		node->maplength = 0;
+		node->serialno = file_st->st_ino;
+		node->data = NULL;
+		node->height = 0;
+		node->root = malloc(1024 * sizeof(unsigned long));
+		for (i = 0; i < 1024; i++)
+			node->root[i] = 0;
+	}
+
+	return node;
+}
+
 RETT_OPEN _nvp_OPEN(INTF_OPEN)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
@@ -677,35 +714,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		DEBUG("File exists before we open it.  Let's get the lock first.\n");
 
 		// Find or allocate a NVNode
-		int i;
-		for(i=0; i<OPEN_MAX; i++)
-		{
-			if( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st.st_ino) {
-				DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
-				node = _nvp_fd_lookup[i].node;
-				SANITYCHECK(node != NULL);
-				// when sharing nodes it's good to msync in case of multithreading // TODO is this true?
-				if(msync(node->data, node->maplength, MS_SYNC|MS_INVALIDATE)) {
-					ERROR("Failed to msync for path %s\n", path);
-					assert(0);
-				}
-				break;
-			}
-		}
-		if(node==NULL) {
-			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
-			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
-			memset(node, 0, sizeof(struct NVNode));
-			NVP_LOCK_INIT(node->lock);
-			node->length = file_st.st_size;
-			node->maplength = 0;
-			node->serialno = file_st.st_ino;
-			node->data = NULL;
-			node->height = 0;
-			node->root = malloc(1024 * sizeof(unsigned long));
-			for (i = 0; i < 1024; i++)
-				node->root[i] = 0;
-		}
+		node = nvp_get_node(path, &file_st);
 		
 		NVP_LOCK_WR(node->lock);
 	}
@@ -764,35 +773,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		DEBUG("We created the file.  Let's check and make sure someone else hasn't already created the node.\n");
 
 		// Find or allocate a NVNode
-		int i;
-		for(i=0; i<OPEN_MAX; i++)
-		{
-			if( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st.st_ino) {
-				DEBUG("File %s is (or was) already open in fd %i (this fd is fd %i)!  Sharing nodes.\n", path, i, result);
-				node = _nvp_fd_lookup[i].node;
-				SANITYCHECK(node != NULL);
-				// when sharing nodes it's good to msync in case of multithreading // TODO is this true?
-				if(msync(node->data, node->maplength, MS_SYNC|MS_INVALIDATE)) {
-					ERROR("Failed to msync for fd %i\n", result);
-					assert(0);
-				}
-				break;
-			}
-		}
-		if(node==NULL) {
-			DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
-			node = (struct NVNode*) calloc(1, sizeof(struct NVNode));
-			memset(node, 0, sizeof(struct NVNode));
-			NVP_LOCK_INIT(_nvp_fd_lookup[i].lock);
-			node->length = file_st.st_size;
-			node->maplength = 0;
-			node->serialno = file_st.st_ino;
-			node->data = NULL;
-			node->height = 0;
-			node->root = malloc(1024 * sizeof(unsigned long));
-			for (i = 0; i < 1024; i++)
-				node->root[i] = 0;
-		}
+		node = nvp_get_node(path, &file_st);
 		
 		NVP_LOCK_WR(node->lock);
 	}
