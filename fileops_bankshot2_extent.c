@@ -371,6 +371,7 @@ retry:
 				curr->count, curr->mmap_addr);
 //			assert(0);
 			bankshot2_print_extent_tree(node);
+			goto overlap_check;
 		}
 	}
 
