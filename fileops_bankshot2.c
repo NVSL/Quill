@@ -392,6 +392,8 @@ enum timing_category {
 	pread_t,
 	write_t,
 	pwrite_t,
+	open_t,
+	close_t,
 	fsync_t,
 	fdsync_t,
 	falloc_t,
@@ -414,6 +416,8 @@ const char *Timingstring[TIMING_NUM] =
 	"PREAD",
 	"WRITE",
 	"PWRITE",
+	"OPEN",
+	"CLOSE",
 	"Fsync",
 	"Fdsync",
 	"Fallocate",
@@ -838,12 +842,15 @@ struct NVNode * bankshot2_get_node(const char *path, struct stat *file_st)
 RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 {
 	int mode = 0;
+	timing_type open_time;
 
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	BANKSHOT2_START_TIMING(open_t, open_time);
 
 	if (path == NULL) {
 		DEBUG("Invalid path.\n");
 		errno = EINVAL;
+		BANKSHOT2_END_TIMING(open_t, open_time);
 		return -1;
 	}
 	
@@ -901,6 +908,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		{
 			DEBUG("File does not exist and is not set to be created.  returning\n");
 			errno = ENOENT;
+			BANKSHOT2_END_TIMING(open_t, open_time);
 			return -1;
 		}
 	}
@@ -910,6 +918,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 		{
 			DEBUG("File exists but failed to get file stats!\n");
 			errno = EACCES;
+			BANKSHOT2_END_TIMING(open_t, open_time);
 			return -1;
 		}
 
@@ -955,6 +964,7 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	if(result<0)
 	{
 		DEBUG("_bankshot2_OPEN->%s_OPEN failed: %s\n", _bankshot2_fileops->name, strerror(errno));
+		BANKSHOT2_END_TIMING(open_t, open_time);
 		return result;
 	}	
 
@@ -1107,12 +1117,17 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 	NVP_UNLOCK_FD_WR(nvf);
 
 	errno = 0;
+	BANKSHOT2_END_TIMING(open_t, open_time);
 	return nvf->fd;
 }
 
 RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 {
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	timing_type close_time;
+	RETT_CLOSE result;
+
+	BANKSHOT2_START_TIMING(close_t, close_time);
 
 	DEBUG("_bankshot2_CLOSE(%i)\n", file);
 
@@ -1124,7 +1139,9 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 		nvf->posix = 0;
 		nvf->node->reference--;
 		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
-		return _bankshot2_fileops->CLOSE(CALL_CLOSE);
+		result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
+		BANKSHOT2_END_TIMING(close_t, close_time);
+		return result;
 	}
 
 	NVP_LOCK_FD_WR(nvf);
@@ -1135,11 +1152,12 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 	nvf->node->reference--;
 	DEBUG("fd %d, cache ino %d\n", nvf->fd, nvf->cache_serialno);
 
-	RETT_CLOSE result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
+	result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
 
 	NVP_UNLOCK_NODE_WR(nvf);
 	NVP_UNLOCK_FD_WR(nvf);
 	DEBUG("_bankshot2_CLOSE(%i) finished\n\n", file);
+	BANKSHOT2_END_TIMING(close_t, close_time);
 
 	return result;
 }
