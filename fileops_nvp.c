@@ -419,6 +419,8 @@ enum timing_category {
 	write_t,
 	pread_t,
 	pwrite_t,
+	open_t,
+	close_t,
 	fsync_t,
 	fdsync_t,
 	mmap_t,
@@ -439,6 +441,8 @@ const char *Timingstring[TIMING_NUM] =
 	"WRITE",
 	"PREAD",
 	"PWRITE",
+	"OPEN",
+	"CLOSE",
 	"Fsync",
 	"Fdsync",
 	"mmap",
@@ -579,10 +583,13 @@ void _nvp_print_extend_stats(void)
 RETT_OPEN _nvp_OPEN(INTF_OPEN)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
+	timing_type open_time;
+	NVP_START_TIMING(open_t, open_time);
 
 	if(path==NULL) {
 		DEBUG("Invalid path.\n");
 		errno = EINVAL;
+		NVP_END_TIMING(open_t, open_time);
 		return -1;
 	}
 	
@@ -632,6 +639,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		{
 			DEBUG("File does not exist and is not set to be created.  returning\n");
 			errno = ENOENT;
+			NVP_END_TIMING(open_t, open_time);
 			return -1;
 		}
 	}
@@ -641,6 +649,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		{
 			DEBUG("File exists but failed to get file stats!\n");
 			errno = EACCES;
+			NVP_END_TIMING(open_t, open_time);
 			return -1;
 		}
 
@@ -715,6 +724,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	if(result<0)
 	{
 		DEBUG("_nvp_OPEN->%s_OPEN failed: %s\n", _nvp_fileops->name, strerror(errno));
+		NVP_END_TIMING(open_t, open_time);
 		return result;
 	}	
 
@@ -829,6 +839,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		nvf->canWrite = 1;
 		NVP_UNLOCK_NODE_WR(nvf);
 		NVP_UNLOCK_FD_WR(nvf);
+		NVP_END_TIMING(open_t, open_time);
 		return nvf->fd;
 		#endif
 	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
@@ -942,12 +953,16 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	NVP_UNLOCK_FD_WR(nvf);
 
 	errno = 0;
+	NVP_END_TIMING(open_t, open_time);
 	return nvf->fd;
 }
 
 RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
+	timing_type close_time;
+	RETT_CLOSE result;
+	NVP_START_TIMING(close_t, close_time);
 
 	DEBUG("_nvp_CLOSE(%i)\n", file);
 	num_close++;
@@ -957,7 +972,9 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 	if (nvf->posix) {
 		nvf->valid = 0;
 		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
-		return _nvp_fileops->CLOSE(CALL_CLOSE);
+		result = _nvp_fileops->CLOSE(CALL_CLOSE);
+		NVP_END_TIMING(close_t, close_time);
+		return result;
 	}
 
 	//int iter;
@@ -969,10 +986,11 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 
 	//_nvp_test_invalidate_node(nvf);
 
-	RETT_CLOSE result = _nvp_fileops->CLOSE(CALL_CLOSE);
+	result = _nvp_fileops->CLOSE(CALL_CLOSE);
 
 	NVP_UNLOCK_NODE_WR(nvf);
 	NVP_UNLOCK_FD_WR(nvf);
+	NVP_END_TIMING(close_t, close_time);
 
 	return result;
 }

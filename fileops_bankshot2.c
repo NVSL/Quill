@@ -698,7 +698,7 @@ void bankshot2_print_io_stats(void)
 {
 	struct NVNode *node = NULL;
 	int i;
-
+#if 0
 	for (i = 0; i < OPEN_MAX; i++) {
 		node = &_bankshot2_node_lookup[i];
 		if (node->num_reads)
@@ -737,7 +737,7 @@ void bankshot2_print_io_stats(void)
 				node->total_write_actual >> 12,
 				node->total_write_required);
 	}
-
+#endif
 	printf("================================ Total IO stats: ===============================\n");
 	printf("Total IO stats:\n");
 	printf("OPEN %u, CLOSE %u\n", num_total_open, num_total_close);
