@@ -421,6 +421,7 @@ enum timing_category {
 	pwrite_t,
 	open_t,
 	close_t,
+	get_node_t,
 	fsync_t,
 	fdsync_t,
 	mmap_t,
@@ -443,6 +444,7 @@ const char *Timingstring[TIMING_NUM] =
 	"PWRITE",
 	"OPEN",
 	"CLOSE",
+	"get_node",
 	"Fsync",
 	"Fdsync",
 	"mmap",
@@ -584,6 +586,8 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 {
 	int i;
 	struct NVNode *node = NULL;
+	timing_type get_node_time;
+	NVP_START_TIMING(get_node_t, get_node_time);
 
 	for(i=0; i < OPEN_MAX; i++)
 	{
@@ -614,6 +618,7 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 			node->root[i] = 0;
 	}
 
+	NVP_END_TIMING(get_node_t, get_node_time);
 	return node;
 }
 

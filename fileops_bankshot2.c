@@ -394,6 +394,7 @@ enum timing_category {
 	pwrite_t,
 	open_t,
 	close_t,
+	get_node_t,
 	fsync_t,
 	fdsync_t,
 	falloc_t,
@@ -418,6 +419,7 @@ const char *Timingstring[TIMING_NUM] =
 	"PWRITE",
 	"OPEN",
 	"CLOSE",
+	"get_node",
 	"Fsync",
 	"Fdsync",
 	"Fallocate",
@@ -808,6 +810,9 @@ struct NVNode * bankshot2_get_node(const char *path, struct stat *file_st)
 {
 	struct NVNode *node = NULL;
 	int i;
+	timing_type get_node_time;
+
+	BANKSHOT2_START_TIMING(get_node_t, get_node_time);
 
 	pthread_spin_lock(&node_lookup_lock);
 	for (i = 0; i < OPEN_MAX; i++)
@@ -836,6 +841,8 @@ struct NVNode * bankshot2_get_node(const char *path, struct stat *file_st)
 	node->reference++;
 
 	pthread_spin_unlock(&node_lookup_lock);
+	BANKSHOT2_END_TIMING(get_node_t, get_node_time);
+
 	return node;
 }
 
