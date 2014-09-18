@@ -58,6 +58,7 @@ pthread_spinlock_t node_lookup_lock;
 
 struct NVFile* _bankshot2_fd_lookup;
 struct NVNode* _bankshot2_node_lookup;
+int _bankshot2_ino_lookup[1024];
 
 void _bankshot2_init2(void);
 //int _bankshot2_extend_map(struct NVFile *nvf, size_t newlen);
@@ -774,7 +775,7 @@ void bankshot2_exit_handler(void)
 struct NVNode * bankshot2_allocate_node(void)
 {
 	struct NVNode *node = NULL;
-	int i;
+	int i, candidate = -1;
 
 	// Find a NVNode without backing file inode
 	for (i = 0; i < OPEN_MAX; i++)
@@ -786,24 +787,24 @@ struct NVNode * bankshot2_allocate_node(void)
 			bankshot2_init_node(node);
 			break;
 		}
+
+		if (candidate == -1 && _bankshot2_node_lookup[i].reference == 0)
+			candidate = i;
 	}
 
 	if (node)
 		return node;
 
 	// Find a NVNode without references
-	for (i = 0; i < OPEN_MAX; i++)
-	{
-		if(_bankshot2_node_lookup[i].reference == 0) {
-			node = &_bankshot2_node_lookup[i];
-			DEBUG("Allocating unreferenced NVNode %d\n", i);
-			bankshot2_cleanup_node(node);
-			bankshot2_init_node(node);
-			break;
-		}
+	if (candidate != -1) {
+		node = &_bankshot2_node_lookup[candidate];
+		DEBUG("Allocating unreferenced NVNode %d\n", candidate);
+		bankshot2_cleanup_node(node);
+		bankshot2_init_node(node);
+		return node;
 	}
 
-	return node;
+	return NULL;
 }
 
 struct NVNode * bankshot2_get_node(const char *path, struct stat *file_st)
@@ -815,6 +816,7 @@ struct NVNode * bankshot2_get_node(const char *path, struct stat *file_st)
 	BANKSHOT2_START_TIMING(get_node_t, get_node_time);
 
 	pthread_spin_lock(&node_lookup_lock);
+#if 0
 	for (i = 0; i < OPEN_MAX; i++)
 	{
 		if(_bankshot2_node_lookup[i].serialno == file_st->st_ino) {
@@ -823,6 +825,18 @@ struct NVNode * bankshot2_get_node(const char *path, struct stat *file_st)
 				"Sharing nodes.\n", path, i);
 			node = &_bankshot2_node_lookup[i];
 			break;
+		}
+	}
+#endif
+
+	int index = file_st->st_ino % 1024;
+	if (_bankshot2_ino_lookup[index]) {
+		i = _bankshot2_ino_lookup[index];
+		if(_bankshot2_node_lookup[i].serialno == file_st->st_ino) {
+			DEBUG("File %s is (or was) already open in node %i "
+				"(this node hasn't been __open'ed yet)! "
+				"Sharing nodes.\n", path, i);
+			node = &_bankshot2_node_lookup[i];
 		}
 	}
 
@@ -1034,6 +1048,10 @@ RETT_OPEN _bankshot2_OPEN(INTF_OPEN)
 
 	nvf->node = node;
 
+	int index = file_st.st_ino % 1024;
+	if (_bankshot2_ino_lookup[index] == 0)
+		_bankshot2_ino_lookup[index] = result;
+
 	// Set FD permissions
 	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
 		DEBUG("oflag (%i) specifies O_RDWR for fd %i\n", oflag, result);
@@ -1145,6 +1163,12 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 		nvf->valid = 0;
 		nvf->posix = 0;
 		nvf->node->reference--;
+		if (nvf->node->reference == 0) {
+			nvf->node->serialno = 0;
+			int index = nvf->serialno % 1024;
+			_bankshot2_ino_lookup[index] = 0;
+		}
+		nvf->serialno = 0;
 		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
 		result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
 		BANKSHOT2_END_TIMING(close_t, close_time);
@@ -1157,6 +1181,12 @@ RETT_CLOSE _bankshot2_CLOSE(INTF_CLOSE)
 
 	nvf->valid = 0;
 	nvf->node->reference--;
+	if (nvf->node->reference == 0) {
+		nvf->node->serialno = 0;
+		int index = nvf->serialno % 1024;
+		_bankshot2_ino_lookup[index] = 0;
+	}
+	nvf->serialno = 0;
 	DEBUG("fd %d, cache ino %d\n", nvf->fd, nvf->cache_serialno);
 
 	result = _bankshot2_fileops->CLOSE(CALL_CLOSE);
