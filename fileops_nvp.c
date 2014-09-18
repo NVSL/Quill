@@ -99,6 +99,7 @@ struct NVNode
 
 struct NVFile* _nvp_fd_lookup;
 struct NVNode* _nvp_node_lookup;
+int _nvp_ino_lookup[1024];
 
 void _nvp_init2(void);
 int _nvp_extend_map(int file, size_t newlen);
@@ -689,11 +690,12 @@ struct NVNode * nvp_allocate_node(void)
 
 struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 {
-	int i;
+	int i, index;
 	struct NVNode *node = NULL;
 	timing_type get_node_time;
 	NVP_START_TIMING(get_node_t, get_node_time);
 
+#if 0
 	for(i = 0; i < OPEN_MAX; i++)
 	{
 		if( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st->st_ino) {
@@ -708,6 +710,18 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 			break;
 		}
 	}
+#endif
+
+	index = file_st->st_ino % 1024;
+	if (_nvp_ino_lookup[index]) {
+		i = _nvp_ino_lookup[index];
+		if ( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st->st_ino) {
+			DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
+			node = _nvp_fd_lookup[i].node;
+			SANITYCHECK(node != NULL);
+		}
+	}
+
 	if(node == NULL) {
 		DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 		node = nvp_allocate_node();
@@ -908,6 +922,10 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	nvf->node = node;
 	nvf->posix = 0;
 
+	int index = nvf->serialno % 1024;
+	if (_nvp_ino_lookup[index] == 0)
+		_nvp_ino_lookup[index] = result;
+
 	// Set FD permissions
 	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
 		DEBUG("oflag (%i) specifies O_RDWR for fd %i\n", oflag, result);
@@ -1061,8 +1079,12 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 		nvf->valid = 0;
 		nvf->posix = 0;
 		nvf->node->reference--;
-		if (nvf->node->reference == 0)
+		if (nvf->node->reference == 0) {
 			nvf->node->serialno = 0;
+			int index = nvf->serialno % 1024;
+			_nvp_ino_lookup[index] = 0;
+		}
+		nvf->serialno = 0;
 //		nvf->node = NULL;
 		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
 		result = _nvp_fileops->CLOSE(CALL_CLOSE);
@@ -1077,8 +1099,12 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 
 	nvf->valid = 0;
 	nvf->node->reference--;
-	if (nvf->node->reference == 0)
+	if (nvf->node->reference == 0) {
 		nvf->node->serialno = 0;
+		int index = nvf->serialno % 1024;
+		_nvp_ino_lookup[index] = 0;
+	}
+	nvf->serialno = 0;
 //	nvf->node = NULL;
 
 	//_nvp_test_invalidate_node(nvf);
