@@ -505,17 +505,28 @@ unsigned int num_open;
 unsigned int num_close;
 unsigned int num_read;
 unsigned int num_write;
+unsigned int num_mmap;
+unsigned int num_memcpy_read;
+unsigned int num_memcpy_write;
 unsigned long long read_size;
 unsigned long long write_size;
+unsigned long long memcpy_read_size;
+unsigned long long memcpy_write_size;
 
 void nvp_print_io_stats(void)
 {
 	printf("=========================== NVP IO stats: ==========================\n");
 	printf("open %u, close %u\n", num_open, num_close);
-	printf("READ: count %u, size %llu, average %llu\n", num_read, read_size,
-		num_read ? read_size / num_read : 0);
-	printf("WRITE: count %u, size %llu, average %llu\n", num_write, write_size,
-		num_write ? write_size / num_write : 0);
+	printf("READ: count %u, size %llu, average %llu\n", num_read,
+		read_size, num_read ? read_size / num_read : 0);
+	printf("WRITE: count %u, size %llu, average %llu\n", num_write,
+		write_size, num_write ? write_size / num_write : 0);
+	printf("memcpy READ: count %u, size %llu, average %llu\n",
+		num_memcpy_read, memcpy_read_size,
+		num_memcpy_read ? memcpy_read_size / num_memcpy_read : 0);
+	printf("memcpy WRITE: count %u, size %llu, average %llu\n",
+		num_memcpy_write, memcpy_write_size,
+		num_memcpy_write ? memcpy_write_size / num_memcpy_read : 0);
 }
 
 void nvp_cleanup_node(struct NVNode *node);
@@ -1463,14 +1474,18 @@ not_found:
 		MAX_MMAP_SIZE,
 		max_perms, //max_perms,
 		MAP_SHARED | MAP_POPULATE,
+//		MAP_SHARED,
 		nvf->fd, //fd_with_max_perms,
 		start_offset
 	);
 	NVP_END_TIMING(mmap_t, mmap_time);
+	num_mmap++;
 
 	if (start_addr == MAP_FAILED || start_addr == NULL )
 	{
-		MSG("mmap failed for fd %i: %s\n", nvf->fd, strerror(errno));
+		MSG("mmap failed for fd %i: %s, mmap count %d\n",
+				nvf->fd, strerror(errno), num_mmap);
+		MSG("Open count %d, close count %d\n", num_open, num_close);
 		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
 		nvf->posix = 1;
 		assert(0);
@@ -1666,6 +1681,9 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 			memcpy1(buf, (char *)mmap_addr, extent_length);
 			NVP_END_TIMING(memcpyr_t, memcpyr_time);
 
+		num_memcpy_read++;
+		memcpy_read_size += extent_length;
+
 		SANITYCHECK(result == buf);
 		SANITYCHECK(result > 0);
 
@@ -1857,6 +1875,9 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		NVP_START_TIMING(memcpyw_t, memcpyw_time);
 		FSYNC_MEMCPY((char *)mmap_addr, buf, extent_length);
 		NVP_END_TIMING(memcpyw_t, memcpyw_time);
+
+		num_memcpy_write++;
+		memcpy_write_size += extent_length;
 
 		len_to_write -= extent_length;
 		write_offset += extent_length;
