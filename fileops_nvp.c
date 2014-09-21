@@ -67,6 +67,7 @@ int MMAP_PAGE_SIZE;
 
 void* _nvp_zbuf; // holds all zeroes.  used for aligned file extending. TODO: does sharing this hurt performance?
 
+pthread_spinlock_t	node_lookup_lock;
 
 struct NVFile
 {
@@ -548,8 +549,12 @@ void nvp_cleanup(void)
 
 	free(_nvp_fd_lookup);
 
+	pthread_spin_lock(&node_lookup_lock);
+
 	for (i = 0; i< OPEN_MAX; i++)
 		nvp_cleanup_node(&_nvp_node_lookup[i]);
+
+	pthread_spin_unlock(&node_lookup_lock);
 
 	free(_nvp_node_lookup);
 }
@@ -593,6 +598,8 @@ void _nvp_init2(void)
 	for(i = 0; i < OPEN_MAX; i++) {
 		NVP_LOCK_INIT(_nvp_node_lookup[i].lock);
 	}
+
+	pthread_spin_init(&node_lookup_lock, PTHREAD_PROCESS_SHARED);
 
 	MMAP_PAGE_SIZE = getpagesize();
 	SANITYCHECK(MMAP_PAGE_SIZE > 100);
@@ -719,6 +726,7 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 	timing_type get_node_time;
 	NVP_START_TIMING(get_node_t, get_node_time);
 
+	pthread_spin_lock(&node_lookup_lock);
 #if 0
 	for(i = 0; i < OPEN_MAX; i++)
 	{
@@ -758,6 +766,7 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 	}
 	node->reference++;
 
+	pthread_spin_unlock(&node_lookup_lock);
 	NVP_END_TIMING(get_node_t, get_node_time);
 	return node;
 }
