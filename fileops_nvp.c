@@ -56,6 +56,7 @@ int gettimeofday(struct timeval *tv, struct timezone *tz);
 #define NVP_LOCK_NODE_WR(nvf)		NVP_LOCK_WR(	   nvf->node->lock)
 #define NVP_UNLOCK_NODE_WR(nvf)		NVP_LOCK_UNLOCK_WR(nvf->node->lock)
 
+#define IS_ERR(x) ((unsigned long)(x) >= (unsigned long)-4095)
 
 BOOST_PP_SEQ_FOR_EACH(DECLARE_WITHOUT_ALIAS_FUNCTS_IWRAP, _nvp_, ALLOPS_WPAREN)
 
@@ -508,10 +509,14 @@ unsigned int num_write;
 unsigned int num_mmap;
 unsigned int num_memcpy_read;
 unsigned int num_memcpy_write;
+unsigned int num_posix_read;
+unsigned int num_posix_write;
 unsigned long long read_size;
 unsigned long long write_size;
 unsigned long long memcpy_read_size;
 unsigned long long memcpy_write_size;
+unsigned long long posix_read_size;
+unsigned long long posix_write_size;
 
 void nvp_print_io_stats(void)
 {
@@ -526,7 +531,13 @@ void nvp_print_io_stats(void)
 		num_memcpy_read ? memcpy_read_size / num_memcpy_read : 0);
 	printf("memcpy WRITE: count %u, size %llu, average %llu\n",
 		num_memcpy_write, memcpy_write_size,
-		num_memcpy_write ? memcpy_write_size / num_memcpy_read : 0);
+		num_memcpy_write ? memcpy_write_size / num_memcpy_write : 0);
+	printf("posix READ: count %u, size %llu, average %llu\n",
+		num_posix_read, posix_read_size,
+		num_posix_read ? posix_read_size / num_posix_read : 0);
+	printf("posix WRITE: count %u, size %llu, average %llu\n",
+		num_posix_write, posix_write_size,
+		num_posix_write ? posix_write_size / num_posix_write : 0);
 }
 
 void nvp_cleanup_node(struct NVNode *node);
@@ -671,6 +682,7 @@ struct NVNode * nvp_allocate_node(void)
 
 	for (i = 0; i < OPEN_MAX; i++) {
 		if (_nvp_node_lookup[i].serialno == 0) {
+			DEBUG("Allocate1 node %d\n", i);
 			node = &_nvp_node_lookup[i];
 			nvp_cleanup_node(node);
 			nvp_init_node(node);
@@ -688,6 +700,7 @@ struct NVNode * nvp_allocate_node(void)
 
 	if (candidate != -1) {
 		node = &_nvp_node_lookup[candidate];
+		DEBUG("Allocate2 node %d\n", candidate);
 		nvp_cleanup_node(node);
 		nvp_init_node(node);
 		NVP_END_TIMING(alloc_node_t, alloc_node_time);
@@ -1167,7 +1180,6 @@ static ssize_t _nvp_check_write_size_valid(size_t count)
 RETT_READ _nvp_READ(INTF_READ)
 {
 	DEBUG("_nvp_READ %d\n", file);
-	num_read++;
 	timing_type read_time;
 	RETT_READ result;
 	NVP_START_TIMING(read_t, read_time);
@@ -1179,14 +1191,16 @@ RETT_READ _nvp_READ(INTF_READ)
 		result = _nvp_fileops->READ(CALL_READ);
 		NVP_END_TIMING(read_t, read_time);
 		read_size += result;
+		num_posix_read++;
+		posix_read_size += result;
 		return result;
 	}
-
-	int cpuid = GET_CPUID();
 
 	result = _nvp_check_read_size_valid(length);
 	if (result <= 0)
 		return result;
+
+	int cpuid = GET_CPUID();
 
 	NVP_LOCK_FD_RD(nvf, cpuid); // TODO
 	NVP_CHECK_NVF_VALID_WR(nvf);
@@ -1214,6 +1228,7 @@ RETT_READ _nvp_READ(INTF_READ)
 	NVP_UNLOCK_FD_RD(nvf, cpuid);
 
 	NVP_END_TIMING(read_t, read_time);
+	num_read++;
 	read_size += result;
 
 	return result;
@@ -1234,6 +1249,8 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 		result = _nvp_fileops->WRITE(CALL_WRITE);
 		NVP_END_TIMING(write_t, write_time);
 		write_size += result;
+		num_posix_write++;
+		posix_write_size += result;
 		return result;
 	}
 
@@ -1302,6 +1319,8 @@ RETT_PREAD _nvp_PREAD(INTF_PREAD)
 		result = _nvp_fileops->PREAD(CALL_PREAD);
 		NVP_END_TIMING(pread_t, read_time);
 		read_size += result;
+		num_posix_read++;
+		posix_read_size += result;
 		return result;
 	}
 
@@ -1342,6 +1361,8 @@ RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
 		result = _nvp_fileops->PWRITE(CALL_PWRITE);
 		NVP_END_TIMING(pwrite_t, write_time);
 		write_size += result;
+		num_posix_write++;
+		posix_write_size += result;
 		return result;
 	}
 
@@ -1440,6 +1461,11 @@ static int nvp_get_mmap_address(struct NVFile *nvf, off_t offset, size_t count,
 	} while(height--);
 	NVP_END_TIMING(lookup_t, lookup_time);
 
+	if (IS_ERR(start_addr) || start_addr == NULL ) {
+		MSG("ERROR!\n");
+		assert(0);
+	}
+
 	*mmap_addr = start_addr + offset % MAX_MMAP_SIZE;
 	*extent_length = MAX_MMAP_SIZE - (offset % MAX_MMAP_SIZE);
 
@@ -1481,10 +1507,10 @@ not_found:
 	NVP_END_TIMING(mmap_t, mmap_time);
 	num_mmap++;
 
-	if (start_addr == MAP_FAILED || start_addr == NULL )
+	if (IS_ERR(start_addr) || start_addr == NULL )
 	{
-		MSG("mmap failed for fd %i: %s, mmap count %d\n",
-				nvf->fd, strerror(errno), num_mmap);
+		MSG("mmap failed for fd %i: %s, mmap count %d, addr %lu\n",
+				nvf->fd, strerror(errno), num_mmap, start_addr);
 		MSG("Open count %d, close count %d\n", num_open, num_close);
 		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
 		nvf->posix = 1;
@@ -1620,6 +1646,7 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 	{
 		DEBUG("Buffer intersects with map (buffer %p map %p)\n", buf, nvf->node->data);
 		assert(0);
+		NVP_END_TIMING(do_pread_t, do_pread_time);
 		return -1;
 	}
 
@@ -1635,6 +1662,7 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 
 	if(UNLIKELY( (len_to_read <= 0) || (available_length <= 0) ))
 	{
+		NVP_END_TIMING(do_pread_t, do_pread_time);
 		return 0; // reading 0 bytes is easy!
 	}
 
@@ -1664,6 +1692,8 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 			if (read_offset + posix_read > nvf->node->length)
 				nvf->node->length = read_offset + posix_read;
 			read_count += posix_read;
+			num_posix_read++;
+			posix_read_size += posix_read;
 			goto out;
 		default:
 			break;
@@ -1803,6 +1833,8 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		}
 #endif
 		temp_result = _nvp_fileops->PWRITE(nvf->fd, buf, count, offset);
+		num_posix_write++;
+		posix_write_size += temp_result;
 		DEBUG("Done extending NVFile, now let's extend mapping.\n");
 
 		if( offset+count >= nvf->node->maplength )
@@ -1864,6 +1896,8 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			if (write_offset + posix_write > nvf->node->length)
 				nvf->node->length = write_offset + posix_write;
 			write_count += posix_write;
+			num_posix_write++;
+			posix_write_size += posix_write;
 			goto out;
 		default:
 			break;
