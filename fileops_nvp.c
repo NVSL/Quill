@@ -38,10 +38,8 @@ int gettimeofday(struct timeval *tv, struct timezone *tz);
 
 
 #define COUNT_EXTENDS 0
-#if COUNT_EXTENDS
-	volatile size_t _nvp_wr_extended;
-	volatile size_t _nvp_wr_total;
-#endif
+volatile size_t _nvp_wr_extended;
+volatile size_t _nvp_wr_total;
 
 
 #define NVP_DO_LOCKING 1
@@ -539,6 +537,7 @@ void nvp_print_io_stats(void)
 	printf("posix WRITE: count %u, size %llu, average %llu\n",
 		num_posix_write, posix_write_size,
 		num_posix_write ? posix_write_size / num_posix_write : 0);
+	printf("write extends %u\n", _nvp_wr_extended);
 }
 
 void nvp_cleanup_node(struct NVNode *node);
@@ -1814,9 +1813,7 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	
 	if(extension > 0)
 	{
-		#if COUNT_EXTENDS
 		_nvp_wr_extended++;
-		#endif
 
 		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
 			count, nvf->node->length, offset, count, extension);
