@@ -429,7 +429,8 @@ enum timing_category {
 	fsync_t,
 	fdsync_t,
 	mmap_t,
-	TIMING_NUM,
+	get_mmap_t,
+	TIMING_NUM,	// Keep as last entry
 };
 
 unsigned long long Countstats[TIMING_NUM];
@@ -453,6 +454,7 @@ const char *Timingstring[TIMING_NUM] =
 	"Fsync",
 	"Fdsync",
 	"mmap",
+	"get_mmap_addr",
 };
 
 typedef struct timespec timing_type;
@@ -1590,7 +1592,7 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 {
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
-	timing_type do_pread_time, memcpyr_time;
+	timing_type do_pread_time, memcpyr_time, get_mmap_time;
 	NVP_START_TIMING(do_pread_t, do_pread_time);
 	int ret;
 	off_t read_offset;
@@ -1685,8 +1687,10 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 	read_offset = offset;
 
 	while (len_to_read > 0) {
+		NVP_START_TIMING(get_mmap_t, get_mmap_time);
 		ret = nvp_get_mmap_address(nvf, read_offset, read_count,
 					&mmap_addr, &extent_length, wr_lock, cpuid);
+		NVP_END_TIMING(get_mmap_t, get_mmap_time);
 
 		DEBUG("Pread: get_mmap_address returned %d, length %llu\n",
 			ret, extent_length);
@@ -1741,7 +1745,7 @@ out:
 RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
-	timing_type do_pwrite_time, memcpyw_time;
+	timing_type do_pwrite_time, memcpyw_time, get_mmap_time;
 	NVP_START_TIMING(do_pwrite_t, do_pwrite_time);
 	int ret;
 	off_t write_offset;
@@ -1887,8 +1891,10 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	write_offset = offset;
 
 	while (len_to_write > 0) {
+		NVP_START_TIMING(get_mmap_t, get_mmap_time);
 		ret = nvp_get_mmap_address(nvf, write_offset, write_count,
 					&mmap_addr, &extent_length, wr_lock, cpuid);
+		NVP_END_TIMING(get_mmap_t, get_mmap_time);
 
 		DEBUG("Pwrite: get_mmap_address returned %d, length %llu\n",
 					ret, extent_length);
