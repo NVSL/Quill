@@ -389,6 +389,7 @@ enum timing_category {
 	insert_t,
 	kernel_t,
 	get_inode_t,
+	evict_inode_t,
 	read_t,
 	pread_t,
 	write_t,
@@ -414,6 +415,7 @@ const char *Timingstring[TIMING_NUM] =
 	"Tree_insert",
 	"kernel",
 	"Get_inode",
+	"Evict_inode",
 	"READ",
 	"PREAD",
 	"WRITE",
@@ -2858,11 +2860,61 @@ RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL)
 	return result;
 }
 
+/* Evict the cache file inode. */
+static int _bankshot2_evict_cache_inode(const char *path)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	int fd;
+	int result;
+	struct bankshot2_cache_data data;
+	timing_type evict_inode_time;
+
+	if(path == NULL) {
+		ERROR("Invalid path.\n");
+		errno = EINVAL;
+		return -1;
+	}
+
+	DEBUG("_bankshot2_get_cache_inode for %s\n", path);
+
+	fd = _bankshot2_fileops->OPEN(path, O_RDWR);
+	if (fd <= 0) {
+		ERROR("Path %s open failed.\n", path);
+		errno = EINVAL;
+		return -1;
+	}
+
+	DEBUG("fd %d\n", fd);
+
+	data.file = fd;
+	data.cache_ino = 0;
+
+	DEBUG("Send IOCTL_EVICT_INODE request\n");
+	BANKSHOT2_START_TIMING(evict_inode_t, evict_inode_time);
+	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
+					BANKSHOT2_IOCTL_EVICT_INODE, &data);
+	BANKSHOT2_END_TIMING(evict_inode_t, evict_inode_time);
+
+	if (result < 0)
+	{
+		DEBUG("IOCTL_EVICT_INODE failed: %d\n", result);
+		return result;
+	}	
+
+	DEBUG("_bankshot2_evict_cache_inode succeeded for path %s\n", path);
+
+	_bankshot2_fileops->CLOSE(fd);
+
+	return 0;
+}
+
 RETT_UNLINK _bankshot2_UNLINK(INTF_UNLINK)
 {
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("CALL: _bankshot2_UNLINK\n");
+	DEBUG("CALL: _bankshot2_UNLINK for path %s\n", path);
+
+	_bankshot2_evict_cache_inode(path);
 
 	RETT_UNLINK result = _bankshot2_fileops->UNLINK(CALL_UNLINK);
 
@@ -2874,6 +2926,8 @@ RETT_UNLINKAT _bankshot2_UNLINKAT(INTF_UNLINKAT)
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
 	DEBUG("CALL: _bankshot2_UNLINKAT\n");
+
+	_bankshot2_evict_cache_inode(path);
 
 	RETT_UNLINKAT result = _bankshot2_fileops->UNLINKAT(CALL_UNLINKAT);
 
