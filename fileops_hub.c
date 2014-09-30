@@ -855,6 +855,17 @@ RETT_UNLINK _hub_UNLINK(INTF_UNLINK)
 	return result;
 }
 
+RETT_UNLINKAT _hub_UNLINKAT(INTF_UNLINKAT)
+{
+	CHECK_RESOLVE_FILEOPS(_hub_);
+
+	DEBUG("CALL: _hub_UNLINKAT\n");
+
+	RETT_UNLINKAT result = _hub_managed_fileops->UNLINKAT(CALL_UNLINKAT);
+
+	return result;
+}
+
 /*
 RETT_CLONE _hub_CLONE(INTF_CLONE)
 {
