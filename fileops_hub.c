@@ -844,6 +844,16 @@ RETT_ACCEPT _hub_ACCEPT(INTF_ACCEPT)
 	return result;
 }
 
+RETT_UNLINK _hub_UNLINK(INTF_UNLINK)
+{
+	CHECK_RESOLVE_FILEOPS(_hub_);
+
+	DEBUG("CALL: _hub_UNLINK\n");
+
+	RETT_UNLINK result = _hub_managed_fileops->UNLINK(CALL_UNLINK);
+
+	return result;
+}
 
 /*
 RETT_CLONE _hub_CLONE(INTF_CLONE)

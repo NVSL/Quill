@@ -2376,6 +2376,17 @@ RETT_IOCTL _nvp_IOCTL(INTF_IOCTL)
 	return result;
 }
 
+RETT_UNLINK _nvp_UNLINK(INTF_UNLINK)
+{
+	CHECK_RESOLVE_FILEOPS(_nvp_);
+
+	DEBUG("CALL: _nvp_UNLINK\n");
+
+	RETT_UNLINK result = _nvp_fileops->UNLINK(CALL_UNLINK);
+
+	return result;
+}
+
 RETT_FSYNC _nvp_FSYNC(INTF_FSYNC)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);

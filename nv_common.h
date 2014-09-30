@@ -81,7 +81,7 @@ extern FILE* _nvp_print_fd;
 // I would have implemented this with BOOST_PP, but <see previous line>
 #define OPS_FINITEPARAMS_64 (TRUNC64) (SEEK64)
 #define OPS_64 OPS_FINITEPARAMS (OPEN64)
-#define ALLOPS_FINITEPARAMS_WPAREN (READ) (WRITE) (CLOSE) (SEEK) (TRUNC) (DUP) (DUP2) (FORK) (READV) (WRITEV) (PIPE) OPS_FINITEPARAMS_64 (PREAD) (PWRITE) (FSYNC) (FDSYNC) (SOCKET) (ACCEPT)
+#define ALLOPS_FINITEPARAMS_WPAREN (READ) (WRITE) (CLOSE) (SEEK) (TRUNC) (DUP) (DUP2) (FORK) (READV) (WRITEV) (PIPE) OPS_FINITEPARAMS_64 (PREAD) (PWRITE) (FSYNC) (FDSYNC) (SOCKET) (ACCEPT) (UNLINK)
 #define ALLOPS_WPAREN (OPEN) (IOCTL) ALLOPS_FINITEPARAMS_WPAREN
 // NOTE: clone is missing on purpose.(MMAP) (MUNMAP) (MSYNC) (CLONE) (MMAP64)
 
@@ -211,6 +211,7 @@ struct Fileops_p* default_resolve_fileops(char* tree, char* name);
 #define ALIAS_MKSTEMP mkstemp
 #define ALIAS_ACCEPT  accept
 #define ALIAS_SOCKET  socket
+#define ALIAS_UNLINK  unlink
 
 // The function return type
 #define RETT_OPEN   int
@@ -241,6 +242,7 @@ struct Fileops_p* default_resolve_fileops(char* tree, char* name);
 #define RETT_MKSTEMP int
 #define RETT_ACCEPT  int
 #define RETT_SOCKET  int
+#define RETT_UNLINK  int
 
 
 // The function interface
@@ -272,6 +274,7 @@ struct Fileops_p* default_resolve_fileops(char* tree, char* name);
 #define INTF_MKSTEMP char* file
 #define INTF_ACCEPT  int file, struct sockaddr *addr, socklen_t *addrlen
 #define INTF_SOCKET  int domain, int type, int protocol
+#define INTF_UNLINK  const char* path
 
 // The interface, without types.  Used when calling from inside macros.
 // CALL_ names must match INTF_ names.
@@ -303,6 +306,7 @@ struct Fileops_p* default_resolve_fileops(char* tree, char* name);
 #define CALL_MKSTEMP file
 #define CALL_ACCEPT  file, addr, addrlen
 #define CALL_SOCKET  domain, type, protocol
+#define CALL_UNLINK  path
 
 // A format string for printf on the parameters
 #define PFFS_OPEN   "%s, %i"
@@ -333,6 +337,7 @@ struct Fileops_p* default_resolve_fileops(char* tree, char* name);
 #define PFFS_MKSTEMP "%s"
 #define PFFS_ACCEPT  "%d, %p, %p"
 #define PFFS_SOCKET  "%d, %d, %d"
+#define PFFS_UNLINK  "%s"
 
 
 // STD: the lowest (non-weak alias) version used by gcc
@@ -362,6 +367,7 @@ struct Fileops_p* default_resolve_fileops(char* tree, char* name);
 #define STD_FSYNC  __fsync
 #define STD_FDSYNC __fdsync
 #define STD_MKSTEMP mkstemp
+#define STD_UNLINK __unlink
 
 
 
