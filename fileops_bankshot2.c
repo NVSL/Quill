@@ -703,8 +703,8 @@ void bankshot2_clear_mappings(void)
 
 void bankshot2_print_io_stats(void)
 {
-	struct NVNode *node = NULL;
-	int i;
+//	struct NVNode *node = NULL;
+//	int i;
 #if 0
 	for (i = 0; i < OPEN_MAX; i++) {
 		node = &_bankshot2_node_lookup[i];
@@ -2854,6 +2854,28 @@ RETT_IOCTL _bankshot2_IOCTL(INTF_IOCTL)
 	int* third = va_arg(arg, int*);
 
 	RETT_IOCTL result = _bankshot2_fileops->IOCTL(file, request, third);
+
+	return result;
+}
+
+RETT_UNLINK _bankshot2_UNLINK(INTF_UNLINK)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+
+	DEBUG("CALL: _bankshot2_UNLINK\n");
+
+	RETT_UNLINK result = _bankshot2_fileops->UNLINK(CALL_UNLINK);
+
+	return result;
+}
+
+RETT_UNLINKAT _bankshot2_UNLINKAT(INTF_UNLINKAT)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+
+	DEBUG("CALL: _bankshot2_UNLINKAT\n");
+
+	RETT_UNLINKAT result = _bankshot2_fileops->UNLINKAT(CALL_UNLINKAT);
 
 	return result;
 }
