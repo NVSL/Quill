@@ -608,7 +608,8 @@ static int _bankshot2_get_cache_inode(const char *path, int oflag, int mode,
 	data.read = nvf->canRead ? 1 : 0;
 	data.write = nvf->canWrite ? 1 : 0;
 
-	DEBUG("Send IOCTL_GET_INODE request\n");
+	DEBUG("Send IOCTL_GET_INODE request 0x%x to %d\n",
+			BANKSHOT2_IOCTL_GET_INODE, bankshot2_ctrl_fd);
 	BANKSHOT2_START_TIMING(get_inode_t, get_inode_time);
 	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
 					BANKSHOT2_IOCTL_GET_INODE, &data);
@@ -2875,7 +2876,7 @@ static int _bankshot2_evict_cache_inode(const char *path)
 		return -1;
 	}
 
-	DEBUG("_bankshot2_get_cache_inode for %s\n", path);
+	DEBUG("_bankshot2_evict_cache_inode for %s\n", path);
 
 	fd = _bankshot2_fileops->OPEN(path, O_RDWR);
 	if (fd <= 0) {
@@ -2884,12 +2885,11 @@ static int _bankshot2_evict_cache_inode(const char *path)
 		return -1;
 	}
 
-	DEBUG("fd %d\n", fd);
-
 	data.file = fd;
 	data.cache_ino = 0;
 
-	DEBUG("Send IOCTL_EVICT_INODE request\n");
+	MSG("Send IOCTL_EVICT_INODE request 0x%x to %d\n",
+			BANKSHOT2_IOCTL_EVICT_INODE, bankshot2_ctrl_fd);
 	BANKSHOT2_START_TIMING(evict_inode_t, evict_inode_time);
 	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
 					BANKSHOT2_IOCTL_EVICT_INODE, &data);
@@ -2897,11 +2897,11 @@ static int _bankshot2_evict_cache_inode(const char *path)
 
 	if (result < 0)
 	{
-		DEBUG("IOCTL_EVICT_INODE failed: %d\n", result);
+		MSG("IOCTL_EVICT_INODE failed: %d\n", result);
 		return result;
 	}	
 
-	DEBUG("_bankshot2_evict_cache_inode succeeded for path %s\n", path);
+	MSG("_bankshot2_evict_cache_inode succeeded for path %s\n", path);
 
 	_bankshot2_fileops->CLOSE(fd);
 
@@ -2925,7 +2925,7 @@ RETT_UNLINKAT _bankshot2_UNLINKAT(INTF_UNLINKAT)
 {
 	CHECK_RESOLVE_FILEOPS(_bankshot2_);
 
-	DEBUG("CALL: _bankshot2_UNLINKAT\n");
+	DEBUG("CALL: _bankshot2_UNLINKAT for path %s\n", path);
 
 	_bankshot2_evict_cache_inode(path);
 
