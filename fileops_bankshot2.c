@@ -687,7 +687,8 @@ void bankshot2_clear_mappings(void)
 		}
 	}
 
-	_bankshot2_fileops->CLOSE(bankshot2_ctrl_fd);
+	if (bankshot2_ctrl_fd)
+		_bankshot2_fileops->CLOSE(bankshot2_ctrl_fd);
 
 	free(_bankshot2_fd_lookup);
 
@@ -2874,6 +2875,15 @@ static int _bankshot2_evict_cache_inode(const char *path)
 		ERROR("Invalid path.\n");
 		errno = EINVAL;
 		return -1;
+	}
+
+	if (!bankshot2_ctrl_fd) {
+		bankshot2_ctrl_fd = _bankshot2_fileops->OPEN(bankshot2_ctrl_dev,
+								O_RDWR);
+		if (!bankshot2_ctrl_fd) {
+			ERROR("Failed to open bankshot2 ctrl dev.\n");
+			assert(0);
+		}
 	}
 
 	DEBUG("_bankshot2_evict_cache_inode for %s\n", path);
