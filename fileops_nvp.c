@@ -1952,7 +1952,7 @@ RETT_SEEK64 _nvp_SEEK64(INTF_SEEK64)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
 
-	DEBUG("_nvp_SEEK64\n");
+	DEBUG("_nvp_SEEK64 %d\n", file);
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 

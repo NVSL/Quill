@@ -2476,6 +2476,9 @@ RETT_SEEK64 _bankshot2_do_seek64(INTF_SEEK64)
 	DEBUG("_bankshot2_do_seek64\n");
 
 	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+
+	if (!nvf->node)
+		return -1;
 	
 	DEBUG("_bankshot2_do_seek64: file len %li, map len %li, current offset %li, requested offset %li with whence %li\n", 
 		nvf->node->length, nvf->node->maplength, *nvf->offset, offset, whence);
@@ -2871,7 +2874,7 @@ static int _bankshot2_evict_cache_inode(const char *path)
 	struct bankshot2_cache_data data;
 	timing_type evict_inode_time;
 
-	if(path == NULL) {
+	if (path == NULL) {
 		ERROR("Invalid path.\n");
 		errno = EINVAL;
 		return -1;
