@@ -2947,7 +2947,7 @@ RETT_UNLINKAT _bankshot2_UNLINKAT(INTF_UNLINKAT)
 	return result;
 }
 
-#if ENABLE_FSYNC
+#if ENABLE_FSYNC_TO_BS
 
 int bankshot2_sync(struct NVFile *nvf, struct bankshot2_cache_data *data)
 {
@@ -2957,7 +2957,7 @@ int bankshot2_sync(struct NVFile *nvf, struct bankshot2_cache_data *data)
 			data->file, data->cache_ino);
 
 	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
-					BANKSHOT2_IOCTL_FSYNC_DATA, data);
+					BANKSHOT2_IOCTL_FSYNC_TO_BS, data);
 	if (result < 0) {
 		ERROR("ioctl cache data read failed %d\n", result);
 		assert(0);
@@ -3015,6 +3015,69 @@ RETT_FDSYNC _bankshot2_FDSYNC(INTF_FDSYNC)
 	BANKSHOT2_END_TIMING(fdsync_t, fdsync_time);
 
 	free(carrier);
+	return result;
+}
+
+#elif ENABLE_FSYNC_TO_CACHE
+
+int bankshot2_sync(struct NVFile *nvf, struct bankshot2_cache_data *data)
+{
+	int result;
+
+	DEBUG("bankshot2 sync: fd %d, cache inode %d\n",
+			data->file, data->cache_ino);
+
+	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
+					BANKSHOT2_IOCTL_FSYNC_TO_CACHE, data);
+	if (result < 0) {
+		ERROR("ioctl cache data read failed %d\n", result);
+		assert(0);
+	}
+
+	return result;
+}
+
+RETT_FSYNC _bankshot2_FSYNC(INTF_FSYNC)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	RETT_FSYNC result;
+	timing_type fsync_time;
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	struct bankshot2_cache_data data;
+
+	memset(&data, 0, sizeof(struct bankshot2_cache_data));
+	data.file = nvf->fd;
+	data.cache_ino = nvf->cache_serialno;
+	data.offset = 0;
+	data.size = nvf->node->length;
+	data.datasync = 0;
+
+	BANKSHOT2_START_TIMING(fsync_t, fsync_time);
+	result = bankshot2_sync(nvf, &data);
+	BANKSHOT2_END_TIMING(fsync_t, fsync_time);
+
+	return result;
+}
+
+RETT_FDSYNC _bankshot2_FDSYNC(INTF_FDSYNC)
+{
+	CHECK_RESOLVE_FILEOPS(_bankshot2_);
+	RETT_FDSYNC result;
+	timing_type fdsync_time;
+	struct NVFile* nvf = &_bankshot2_fd_lookup[file];
+	struct bankshot2_cache_data data;
+
+	memset(&data, 0, sizeof(struct bankshot2_cache_data));
+	data.file = nvf->fd;
+	data.cache_ino = nvf->cache_serialno;
+	data.offset = 0;
+	data.size = nvf->node->length;
+	data.datasync = 1;
+
+	BANKSHOT2_START_TIMING(fdsync_t, fdsync_time);
+	result = bankshot2_sync(nvf, &data);
+	BANKSHOT2_END_TIMING(fdsync_t, fdsync_time);
+
 	return result;
 }
 
