@@ -93,6 +93,9 @@ static sigjmp_buf pwrite_jumper;
 volatile static int do_pread_memcpy;
 volatile static int do_pwrite_memcpy;
 
+int falloc_error;
+#define MAX_FALLOC_ERROR	10
+
 //void * mremap(void *old_address, size_t old_size, size_t new_size, int flags);
 
 MODULE_REGISTRATION_F("bankshot2", _bankshot2_, _bankshot2_init2(); );
@@ -2256,6 +2259,9 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		if (extension < 32768)
 			goto do_pwrite;
 
+		if (falloc_error > MAX_FALLOC_ERROR)
+			goto do_pwrite;
+
 		timing_type falloc_time;
 		BANKSHOT2_START_TIMING(falloc_t, falloc_time);
 		ret = fallocate(file, 0, nvf->node->length, extension);
@@ -2263,6 +2269,7 @@ RETT_PWRITE _bankshot2_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			ERROR("Extend file %d from %lu to %lu failed, "
 				"trying pwrite\n", file, nvf->node->length,
 				count + offset);
+			falloc_error++;
 		} else {
 			BANKSHOT2_END_TIMING(falloc_t, falloc_time);
 			DEBUG("Done extending NVFile.\n");
@@ -2891,7 +2898,7 @@ static int _bankshot2_evict_cache_inode(const char *path)
 
 	DEBUG("_bankshot2_evict_cache_inode for %s\n", path);
 
-	fd = _bankshot2_fileops->OPEN(path, O_RDWR);
+	fd = _bankshot2_fileops->OPEN(path, O_RDONLY);
 	if (fd <= 0) {
 		ERROR("Path %s open failed.\n", path);
 		errno = EINVAL;
@@ -2901,7 +2908,7 @@ static int _bankshot2_evict_cache_inode(const char *path)
 	data.file = fd;
 	data.cache_ino = 0;
 
-	MSG("Send IOCTL_EVICT_INODE request 0x%x to %d\n",
+	DEBUG("Send IOCTL_EVICT_INODE request 0x%x to %d\n",
 			BANKSHOT2_IOCTL_EVICT_INODE, bankshot2_ctrl_fd);
 	BANKSHOT2_START_TIMING(evict_inode_t, evict_inode_time);
 	result = _bankshot2_fileops->IOCTL(bankshot2_ctrl_fd,
@@ -2914,7 +2921,7 @@ static int _bankshot2_evict_cache_inode(const char *path)
 		return result;
 	}	
 
-	MSG("_bankshot2_evict_cache_inode succeeded for path %s\n", path);
+	DEBUG("_bankshot2_evict_cache_inode succeeded for path %s\n", path);
 
 	_bankshot2_fileops->CLOSE(fd);
 
