@@ -1500,6 +1500,13 @@ not_found:
 	}
 
 	start_offset = ALIGN_MMAP_DOWN(offset);	
+	if (start_offset + MAX_MMAP_SIZE > nvf->node->length) {
+		ERROR("File length smaller than offset: "
+			"length 0x%lx, offset 0x%lx\n",
+			nvf->node->length, offset);
+		return 1;
+	}
+
 	NVP_START_TIMING(mmap_t, mmap_time);
 
 	int max_perms = ((nvf->canRead) ? PROT_READ : 0) | 
