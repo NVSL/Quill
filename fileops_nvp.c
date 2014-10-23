@@ -643,7 +643,19 @@ void nvp_free_btree(unsigned long *root, unsigned long height)
 {
 	int i;
 
-	if (height == 0) return;
+	if (height == 0) {
+#if 0
+		for (i = 0; i < 1024; i++) {
+			if (root && root[i]) {
+				DEBUG("munmap: %d, addr 0x%lx\n",
+					i, root[i]);
+				munmap(root[i], MAX_MMAP_SIZE);
+				root[i] = 0;
+			}
+		}
+#endif
+		return;
+	}
 
 	for (i = 0; i < 1024; i++) {
 		if (root[i]) {
@@ -661,6 +673,7 @@ void nvp_cleanup_node(struct NVNode *node)
 	unsigned int height = node->height;
 	unsigned long *root = node->root;
 
+	DEBUG("Cleanup: root 0x%x, height %u\n", root, height);
 	nvp_free_btree(root, height);
 
 	node->height = 0;
@@ -692,8 +705,10 @@ struct NVNode * nvp_allocate_node(void)
 		if (_nvp_node_lookup[i].serialno == 0) {
 			DEBUG("Allocate1 node %d\n", i);
 			node = &_nvp_node_lookup[i];
+			NVP_LOCK_WR(node->lock);
 			nvp_cleanup_node(node);
 			nvp_init_node(node);
+			NVP_LOCK_UNLOCK_WR(node->lock);
 			break;
 		}
 
@@ -709,8 +724,10 @@ struct NVNode * nvp_allocate_node(void)
 	if (candidate != -1) {
 		node = &_nvp_node_lookup[candidate];
 		DEBUG("Allocate2 node %d\n", candidate);
+		NVP_LOCK_WR(node->lock);
 		nvp_cleanup_node(node);
 		nvp_init_node(node);
+		NVP_LOCK_UNLOCK_WR(node->lock);
 		NVP_END_TIMING(alloc_node_t, alloc_node_time);
 		return node;
 	}
@@ -1137,6 +1154,8 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 		nvf->node->serialno = 0;
 		int index = nvf->serialno % 1024;
 		_nvp_ino_lookup[index] = 0;
+		DEBUG("Cleanup node for %d\n", file);
+//		nvp_cleanup_node(nvf->node);
 	}
 	nvf->serialno = 0;
 //	nvf->node = NULL;
@@ -1576,6 +1595,8 @@ not_found:
 				root = (unsigned long *)root[index];
 		} else {
 			root[index] = start_addr;
+			DEBUG("mmap for fd %i: %d, addr 0x%lx\n",
+				nvf->fd, index, start_addr);
 		}
 		start_offset = start_offset % capacity;
 	} while(height--);
