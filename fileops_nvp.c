@@ -539,7 +539,7 @@ void nvp_print_io_stats(void)
 	printf("posix WRITE: count %u, size %llu, average %llu\n",
 		num_posix_write, posix_write_size,
 		num_posix_write ? posix_write_size / num_posix_write : 0);
-	printf("write extends %u\n", _nvp_wr_extended);
+	printf("write extends %lu\n", _nvp_wr_extended);
 }
 
 void nvp_cleanup_node(struct NVNode *node);
@@ -644,7 +644,7 @@ void nvp_free_btree(unsigned long *root, unsigned long height)
 	int i;
 
 	if (height == 0) {
-#if 0
+#if UNMAP_ON_CLOSE
 		for (i = 0; i < 1024; i++) {
 			if (root && root[i]) {
 				DEBUG("munmap: %d, addr 0x%lx\n",
@@ -1490,7 +1490,7 @@ static int nvp_get_mmap_address(struct NVFile *nvf, off_t offset, size_t count,
 	} while(height--);
 	NVP_END_TIMING(lookup_t, lookup_time);
 
-	if (IS_ERR(start_addr) || start_addr == NULL ) {
+	if (IS_ERR(start_addr) || start_addr == 0) {
 		MSG("ERROR!\n");
 		assert(0);
 	}
@@ -1543,7 +1543,7 @@ not_found:
 	NVP_END_TIMING(mmap_t, mmap_time);
 	num_mmap++;
 
-	if (IS_ERR(start_addr) || start_addr == NULL )
+	if (IS_ERR(start_addr) || start_addr == 0)
 	{
 		MSG("mmap failed for fd %i: %s, mmap count %d, addr %lu\n",
 				nvf->fd, strerror(errno), num_mmap, start_addr);
