@@ -424,6 +424,8 @@ enum timing_category {
 	pwrite_t,
 	open_t,
 	close_t,
+	posix_open_t,
+	posix_close_t,
 	get_node_t,
 	alloc_node_t,
 	fsync_t,
@@ -449,6 +451,8 @@ const char *Timingstring[TIMING_NUM] =
 	"PWRITE",
 	"OPEN",
 	"CLOSE",
+	"Posix OPEN",
+	"Posix CLOSE",
 	"get_node",
 	"alloc_node",
 	"Fsync",
@@ -792,7 +796,7 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 RETT_OPEN _nvp_OPEN(INTF_OPEN)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
-	timing_type open_time;
+	timing_type open_time, posix_open_time;
 	NVP_START_TIMING(open_t, open_time);
 
 	if(path==NULL) {
@@ -891,6 +895,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		NVP_LOCK_WR(node->lock);
 	}
 
+	NVP_START_TIMING(posix_open_t, posix_open_time);
 	if (FLAGS_INCLUDE(oflag, O_CREAT))
 	{
 		va_list arg;
@@ -901,6 +906,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	} else {
 		result = _nvp_fileops->OPEN(path, oflag & (~O_APPEND));
 	}
+	NVP_END_TIMING(posix_open_t, posix_open_time);
 
 	if(result<0)
 	{
@@ -1117,7 +1123,7 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
-	timing_type close_time;
+	timing_type close_time, posix_close_time;
 	RETT_CLOSE result;
 	NVP_START_TIMING(close_t, close_time);
 
@@ -1138,7 +1144,9 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 		nvf->serialno = 0;
 //		nvf->node = NULL;
 		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
+		NVP_START_TIMING(posix_close_t, posix_close_time);
 		result = _nvp_fileops->CLOSE(CALL_CLOSE);
+		NVP_END_TIMING(posix_close_t, posix_close_time);
 		NVP_END_TIMING(close_t, close_time);
 		return result;
 	}
@@ -1162,7 +1170,9 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 
 	//_nvp_test_invalidate_node(nvf);
 
+	NVP_START_TIMING(posix_close_t, posix_close_time);
 	result = _nvp_fileops->CLOSE(CALL_CLOSE);
+	NVP_END_TIMING(posix_close_t, posix_close_time);
 
 	NVP_UNLOCK_NODE_WR(nvf);
 	NVP_UNLOCK_FD_WR(nvf);
