@@ -689,13 +689,10 @@ void nvp_cleanup_node(struct NVNode *node)
 
 void nvp_init_node(struct NVNode *node)
 {
-	int i;
-
 	if (!node->root)
 		node->root = malloc(1024 * sizeof(unsigned long));
 
-	for (i = 0; i < 1024; i++)
-		node->root[i] = 0;
+	memset(node->root, 0, 1024 * sizeof(unsigned long));
 }
 
 struct NVNode * nvp_allocate_node(void)
@@ -709,10 +706,6 @@ struct NVNode * nvp_allocate_node(void)
 		if (_nvp_node_lookup[i].serialno == 0) {
 			DEBUG("Allocate1 node %d\n", i);
 			node = &_nvp_node_lookup[i];
-			NVP_LOCK_WR(node->lock);
-			nvp_cleanup_node(node);
-			nvp_init_node(node);
-			NVP_LOCK_UNLOCK_WR(node->lock);
 			break;
 		}
 
@@ -728,10 +721,6 @@ struct NVNode * nvp_allocate_node(void)
 	if (candidate != -1) {
 		node = &_nvp_node_lookup[candidate];
 		DEBUG("Allocate2 node %d\n", candidate);
-		NVP_LOCK_WR(node->lock);
-		nvp_cleanup_node(node);
-		nvp_init_node(node);
-		NVP_LOCK_UNLOCK_WR(node->lock);
 		NVP_END_TIMING(alloc_node_t, alloc_node_time);
 		return node;
 	}
@@ -749,22 +738,6 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 	NVP_START_TIMING(get_node_t, get_node_time);
 
 	pthread_spin_lock(&node_lookup_lock);
-#if 0
-	for(i = 0; i < OPEN_MAX; i++)
-	{
-		if( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st->st_ino) {
-			DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
-			node = _nvp_fd_lookup[i].node;
-			SANITYCHECK(node != NULL);
-			// when sharing nodes it's good to msync in case of multithreading // TODO is this true?
-			if(msync(node->data, node->maplength, MS_SYNC|MS_INVALIDATE)) {
-				ERROR("Failed to msync for path %s\n", path);
-				assert(0);
-			}
-			break;
-		}
-	}
-#endif
 
 	index = file_st->st_ino % 1024;
 	if (_nvp_ino_lookup[index]) {
@@ -773,6 +746,8 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 			DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
 			node = _nvp_fd_lookup[i].node;
 			SANITYCHECK(node != NULL);
+			node->reference++;
+			goto out;
 		}
 	}
 
@@ -780,15 +755,23 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 		DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
 		node = nvp_allocate_node();
 		assert(node);
-		node->length = file_st->st_size;
-		node->maplength = 0;
 		node->serialno = file_st->st_ino;
 		node->data = NULL;
-		node->height = 0;
+		node->reference++;
 	}
-	node->reference++;
 
 	pthread_spin_unlock(&node_lookup_lock);
+
+	NVP_LOCK_WR(node->lock);
+	if (node->height)
+		nvp_cleanup_node(node);
+	node->height = 0;
+	node->length = file_st->st_size;
+	node->maplength = 0;
+	nvp_init_node(node);
+	NVP_LOCK_UNLOCK_WR(node->lock);
+
+out:
 	NVP_END_TIMING(get_node_t, get_node_time);
 	return node;
 }
@@ -1163,7 +1146,7 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 		int index = nvf->serialno % 1024;
 		_nvp_ino_lookup[index] = 0;
 		DEBUG("Cleanup node for %d\n", file);
-//		nvp_cleanup_node(nvf->node);
+		nvp_cleanup_node(nvf->node);
 	}
 	nvf->serialno = 0;
 //	nvf->node = NULL;
