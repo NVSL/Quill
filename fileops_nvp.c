@@ -546,7 +546,7 @@ void nvp_print_io_stats(void)
 	printf("write extends %lu\n", _nvp_wr_extended);
 }
 
-void nvp_cleanup_node(struct NVNode *node);
+void nvp_cleanup_node(struct NVNode *node, int free_root);
 
 void nvp_cleanup(void)
 {
@@ -557,7 +557,7 @@ void nvp_cleanup(void)
 	pthread_spin_lock(&node_lookup_lock);
 
 	for (i = 0; i< OPEN_MAX; i++)
-		nvp_cleanup_node(&_nvp_node_lookup[i]);
+		nvp_cleanup_node(&_nvp_node_lookup[i], 1);
 
 	pthread_spin_unlock(&node_lookup_lock);
 
@@ -672,7 +672,7 @@ void nvp_free_btree(unsigned long *root, unsigned long height)
 	free(root);
 }
 
-void nvp_cleanup_node(struct NVNode *node)
+void nvp_cleanup_node(struct NVNode *node, int free_root)
 {
 	unsigned int height = node->height;
 	unsigned long *root = node->root;
@@ -681,10 +681,15 @@ void nvp_cleanup_node(struct NVNode *node)
 	nvp_free_btree(root, height);
 
 	node->height = 0;
-	if (node->root && height == 0)
-		free(node->root);
 
-	node->root = NULL;
+	if (node->root && free_root) {
+		free(node->root);
+		node->root = NULL;
+		return;
+	}
+
+	if (node->root)
+		memset(node->root, 0, 1024 * sizeof(unsigned long));
 }
 
 void nvp_init_node(struct NVNode *node)
@@ -747,6 +752,7 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 			node = _nvp_fd_lookup[i].node;
 			SANITYCHECK(node != NULL);
 			node->reference++;
+			pthread_spin_unlock(&node_lookup_lock);
 			goto out;
 		}
 	}
@@ -764,7 +770,7 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 
 	NVP_LOCK_WR(node->lock);
 	if (node->height)
-		nvp_cleanup_node(node);
+		nvp_cleanup_node(node, 0);
 	node->height = 0;
 	node->length = file_st->st_size;
 	node->maplength = 0;
@@ -1134,24 +1140,28 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 		return result;
 	}
 
+	pthread_spin_lock(&node_lookup_lock);
 	//int iter;
+	nvf->node->reference--;
+	if (nvf->node->reference == 0)
+		nvf->node->serialno = 0;
+	pthread_spin_unlock(&node_lookup_lock);
+//	nvf->node = NULL;
+
+	//_nvp_test_invalidate_node(nvf);
+
 	NVP_LOCK_FD_WR(nvf);
 	NVP_CHECK_NVF_VALID_WR(nvf);
 	NVP_LOCK_NODE_WR(nvf);
 
 	nvf->valid = 0;
-	nvf->node->reference--;
 	if (nvf->node->reference == 0) {
-		nvf->node->serialno = 0;
 		int index = nvf->serialno % 1024;
 		_nvp_ino_lookup[index] = 0;
-		DEBUG("Cleanup node for %d\n", file);
-		nvp_cleanup_node(nvf->node);
+		DEBUG("Close Cleanup node for %d\n", file);
+		nvp_cleanup_node(nvf->node, 0);
 	}
 	nvf->serialno = 0;
-//	nvf->node = NULL;
-
-	//_nvp_test_invalidate_node(nvf);
 
 	NVP_START_TIMING(posix_close_t, posix_close_time);
 	result = _nvp_fileops->CLOSE(CALL_CLOSE);
