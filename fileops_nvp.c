@@ -13,7 +13,8 @@
 #include "nvp_mman.h"
 #include "nvp_lock.h"
 
-//#include "my_memcpy_nocache.h"
+#include "fileops_nvp.h"
+
 
 // TODO: manual prefaulting sometimes segfaults
 #define MANUAL_PREFAULT 0
@@ -41,21 +42,6 @@ int gettimeofday(struct timeval *tv, struct timezone *tz);
 volatile size_t _nvp_wr_extended;
 volatile size_t _nvp_wr_total;
 
-
-#define NVP_DO_LOCKING 1
-
-#define NVP_LOCK_FD_RD(nvf, cpuid)	NVP_LOCK_RD(	   nvf->lock, cpuid)
-#define NVP_UNLOCK_FD_RD(nvf, cpuid)	NVP_LOCK_UNLOCK_RD(nvf->lock, cpuid)
-#define NVP_LOCK_FD_WR(nvf)		NVP_LOCK_WR(	   nvf->lock)
-#define NVP_UNLOCK_FD_WR(nvf)		NVP_LOCK_UNLOCK_WR(nvf->lock)
-
-#define NVP_LOCK_NODE_RD(nvf, cpuid)	NVP_LOCK_RD(	   nvf->node->lock, cpuid)
-#define NVP_UNLOCK_NODE_RD(nvf, cpuid)	NVP_LOCK_UNLOCK_RD(nvf->node->lock, cpuid)
-#define NVP_LOCK_NODE_WR(nvf)		NVP_LOCK_WR(	   nvf->node->lock)
-#define NVP_UNLOCK_NODE_WR(nvf)		NVP_LOCK_UNLOCK_WR(nvf->node->lock)
-
-#define IS_ERR(x) ((unsigned long)(x) >= (unsigned long)-4095)
-
 BOOST_PP_SEQ_FOR_EACH(DECLARE_WITHOUT_ALIAS_FUNCTS_IWRAP, _nvp_, ALLOPS_WPAREN)
 
 RETT_OPEN _nvp_OPEN(INTF_OPEN);
@@ -66,36 +52,6 @@ int MMAP_PAGE_SIZE;
 void* _nvp_zbuf; // holds all zeroes.  used for aligned file extending. TODO: does sharing this hurt performance?
 
 pthread_spinlock_t	node_lookup_lock;
-
-struct NVFile
-{
-	NVP_LOCK_DECL;
-	volatile bool valid;
-	int fd;
-	volatile size_t* offset;
-	bool canRead;
-	bool canWrite;
-	bool append;
-	bool aligned;
-	ino_t serialno; // duplicated so that iterating doesn't require following every node*
-	struct NVNode* node;
-	bool posix;
-	bool debug;
-};
-
-struct NVNode
-{
-	ino_t serialno;
-	NVP_LOCK_DECL;
-	char* volatile data; // the pointer itself is volatile
-	volatile size_t length;
-	volatile size_t maplength;
-	unsigned long *root;
-	unsigned int height;
-	int reference;
-//	volatile int maxPerms;
-//	volatile int valid; // for debugging purposes
-};
 
 struct NVFile* _nvp_fd_lookup;
 struct NVNode* _nvp_node_lookup;
