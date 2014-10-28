@@ -16,29 +16,10 @@
 #include "fileops_nvp.h"
 
 
-// TODO: manual prefaulting sometimes segfaults
-#define MANUAL_PREFAULT 0
-#define MMAP_PREFAULT 1
-
-#define MAX_MMAP_SIZE	2097152
-#define	ALIGN_MMAP_DOWN(addr)	((addr) & ~(MAX_MMAP_SIZE - 1))
-
-#define DO_ALIGNMENT_CHECKS 0
-
 struct timezone;
 struct timeval;
 int gettimeofday(struct timeval *tv, struct timezone *tz);
 
-
-#define NOSANITYCHECK 1
-#if NOSANITYCHECK
-	#define SANITYCHECK(x)
-#else
-	#define SANITYCHECK(x) if(UNLIKELY(!(x))) { ERROR("NVP_SANITY("#x") failed!\n"); exit(101); }
-#endif
-
-
-#define COUNT_EXTENDS 0
 volatile size_t _nvp_wr_extended;
 volatile size_t _nvp_wr_total;
 
@@ -58,7 +39,6 @@ struct NVNode* _nvp_node_lookup;
 int _nvp_ino_lookup[1024];
 
 void _nvp_init2(void);
-int _nvp_extend_map(int file, size_t newlen);
 void _nvp_SIGBUS_handler(int sig);
 void _nvp_SIGUSR1_handler(int sig);
 void _nvp_test_invalidate_node(struct NVFile* nvf);
@@ -67,67 +47,7 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like PWRITE,
 RETT_PWRITE _nvp_do_pread (INTF_PREAD, int wr_lock, int cpuid); // like PREAD , but without locks (called by _nvp_READ )
 RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_write
 
-#define DO_MSYNC(nvf) do{ \
-	DEBUG("NOT doing a msync\n"); }while(0)
-/*
-	DEBUG("Doing a msync on fd %i (node %p)\n", nvf->fd, nvf->node); \
-	if(msync(nvf->node->data, nvf->node->maplength, MS_SYNC|MS_INVALIDATE)) { \
-		ERROR("Failed to msync for fd %i\n", nvf->fd); \
-		assert(0); \
-	} }while(0)
-*/
-
-int _nvp_lock_return_val;
-int _nvp_write_pwrite_lock_handoff;
-
-
-//void * mremap(void *old_address, size_t old_size, size_t new_size, int flags);
-
 MODULE_REGISTRATION_F("nvp", _nvp_, _nvp_init2(); );
-
-#define NVP_CHECK_NVF_VALID(nvf) do{ \
-	if(UNLIKELY(!nvf->valid)) { \
-		DEBUG("Invalid file descriptor: %i\n", file); \
-		errno = EBADF; \
-		NVP_UNLOCK_FD_RD(nvf, cpuid); \
-		return -1; \
-	} \
-	else \
-	{ \
-		DEBUG("this function is operating on node %p\n", nvf->node); \
-		SANITYCHECKNVF(nvf); \
-		DO_MSYNC(nvf); \
-	} \
-	} while(0)
-
-#define NVP_CHECK_NVF_VALID_WR(nvf) do{ \
-	if(UNLIKELY(!nvf->valid)) { \
-		DEBUG("Invalid file descriptor: %i\n", file); \
-		errno = EBADF; \
-		NVP_UNLOCK_FD_WR(nvf); \
-		return -1; \
-	} \
-	else \
-	{ \
-		DEBUG("this function is operating on node %p\n", nvf->node); \
-		SANITYCHECKNVF(nvf); \
-		DO_MSYNC(nvf); \
-	} \
-	} while(0)
-
-#define SANITYCHECKNVF(nvf) \
-		SANITYCHECK(nvf->valid); \
-		SANITYCHECK(nvf->node != NULL); \
-		SANITYCHECK(nvf->fd >= 0); \
-		SANITYCHECK(nvf->fd < OPEN_MAX); \
-		SANITYCHECK(nvf->offset != NULL); \
-		SANITYCHECK(*nvf->offset >= 0); \
-		SANITYCHECK(nvf->serialno != 0); \
-		SANITYCHECK(nvf->serialno == nvf->node->serialno); \
-		SANITYCHECK(nvf->node->length >=0); \
-		SANITYCHECK(nvf->node->maplength >= nvf->node->length); \
-		SANITYCHECK(nvf->node->data != NULL)
-
 
 #define NVP_WRAP_HAS_FD(op) \
 	RETT_##op _nvp_##op ( INTF_##op ) { \
@@ -150,7 +70,6 @@ MODULE_REGISTRATION_F("nvp", _nvp_, _nvp_init2(); );
 #define NVP_WRAP_HAS_FD_IWRAP(r, data, elem) NVP_WRAP_HAS_FD(elem)
 #define NVP_WRAP_NO_FD_IWRAP(r, data, elem) NVP_WRAP_NO_FD(elem)
 
-//BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_HAS_FD_IWRAP, placeholder, (FSYNC) (FDSYNC) (ACCEPT))
 BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_HAS_FD_IWRAP, placeholder, (ACCEPT))
 BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_NO_FD_IWRAP, placeholder, (PIPE) (FORK) (SOCKET))
 
@@ -499,7 +418,7 @@ void nvp_print_io_stats(void)
 	printf("posix WRITE: count %u, size %llu, average %llu\n",
 		num_posix_write, posix_write_size,
 		num_posix_write ? posix_write_size / num_posix_write : 0);
-	printf("write extends %lu\n", _nvp_wr_extended);
+	printf("write extends %lu, total %lu\n", _nvp_wr_extended, _nvp_wr_total);
 }
 
 void nvp_cleanup_node(struct NVNode *node, int free_root);
@@ -541,8 +460,6 @@ void _nvp_init2(void)
 //	atexit(report_memcpy_usec);
 	#endif
 
-	_nvp_write_pwrite_lock_handoff = 0;
-
 	assert(!posix_memalign(((void**)&_nvp_zbuf), 4096, 4096));
 
 	_nvp_fd_lookup = (struct NVFile*) calloc(OPEN_MAX, sizeof(struct NVFile));
@@ -565,11 +482,6 @@ void _nvp_init2(void)
 	MMAP_PAGE_SIZE = getpagesize();
 	SANITYCHECK(MMAP_PAGE_SIZE > 100);
 
-	#if COUNT_EXTENDS
-	_nvp_wr_extended = 0;
-	_nvp_wr_total    = 0;
-	#endif
-
 	DEBUG("Installing signal handler.\n");
 	signal(SIGBUS, _nvp_SIGBUS_handler);
 	/* For filebench */
@@ -584,20 +496,6 @@ void _nvp_init2(void)
 	atexit(nvp_exit_handler);
 //	_nvp_debug_handoff();
 }
-
-#if COUNT_EXTENDS
-void _nvp_print_extend_stats(void) __attribute__ ((destructor));
-void _nvp_print_extend_stats(void)
-{
-	FILE * pFile;
-	pFile = fopen ("results.txt","w");
-	fprintf(pFile, "extended: %li\ntotal: %li\nratio: %f\n", _nvp_wr_extended, _nvp_wr_total, ((float)_nvp_wr_extended)/(_nvp_wr_extended+_nvp_wr_total));
-	fclose (pFile);
-	DEBUG("NVP: writes which extended: %li\n", _nvp_wr_extended);
-	DEBUG("NVP: total writes         : %li\n", _nvp_wr_total);
-	//DEBUG("NVP: extended/total       : %f\n", ((float)_nvp_wr_extended)/(_nvp_wr_extended+_nvp_wr_total));
-}
-#endif
 
 void nvp_free_btree(unsigned long *root, unsigned long height)
 {
@@ -967,16 +865,6 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		nvf->append = 0;
 	}
 
-/*
-	nvf->node->maxPerms |= (nvf->canRead)?PROT_READ:0;
-
-	if( (!FLAGS_INCLUDE(nvf->node->maxPerms, PROT_WRITE)) && nvf->canWrite)
-	{
-		DEBUG("Map didn't have write perms, but it's about to.  We're going to need a new map.\n");
-		nvf->node->maxPerms |= PROT_WRITE;
-		//_nvp_extend_map(nvf->fd, nvf->node->maplength+1); // currently set to get a new map every time
-	}
-*/
 	SANITYCHECK(nvf->node != NULL);
 	SANITYCHECK(nvf->node->length >= 0);
 
@@ -1011,34 +899,6 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		nvf->debug = 1;
 //		MSG("A Posix Path: %s\n", path);
 	}
-
-#if 0
-	if (nvf->posix == 0 && nvf->node->length > 0)
-	{
-//		DEBUG("map was not already allocated (was %li).  Let's allocate one.\n", nvf->node->maplength);
-//		_nvp_extend_map(nvf->fd, nvf->node->length);
-	
-		//if(_nvp_extend_map(nvf->fd, MAX(1, MAX(nvf->node->maplength+1, nvf->node->length))))
-		DEBUG("Mmap file %s length %lu\n", path, nvf->node->length);
-		if(_nvp_extend_map(nvf->fd, nvf->node->length))
-		{
-			DEBUG("Failed to _nvp_extend_map, passing it up the chain\n");
-			NVP_UNLOCK_NODE_WR(nvf);
-			NVP_UNLOCK_FD_WR(nvf);
-			return -1;
-		}
-
-		SANITYCHECK(nvf->node->maplength > 0);
-//		SANITYCHECK(nvf->node->maplength >= nvf->node->length);
-		
-		if(nvf->node->data < 0) {
-			ERROR("Failed to mmap path %s: %s\n", path, strerror(errno));
-			assert(0);
-		}
-
-		DEBUG("mmap successful.  result: %p\n", nvf->node->data);
-	}
-#endif
 
 	SANITYCHECK(nvf->node->length >= 0);
 //	SANITYCHECK(nvf->node->maplength >= nvf->node->length);
@@ -1742,9 +1602,7 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 
 	DEBUG("_nvp_do_pwrite\n");
 
-	#if COUNT_EXTENDS
 	_nvp_wr_total++;
-	#endif
 
 	struct NVFile* nvf = &_nvp_fd_lookup[file];
 	SANITYCHECKNVF(nvf);
@@ -2080,10 +1938,6 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 		MSG("TRUNC64 shortened file from %li to %li\n", nvf->node->length, length);
 	}
 
-	MSG("Done with trunc, we better update map!\n");
-
-//	_nvp_extend_map(nvf->fd, length);
-
 	nvf->node->length = length;
 
 	DO_MSYNC(nvf);
@@ -2415,207 +2269,6 @@ RETT_FDSYNC _nvp_FDSYNC(INTF_FDSYNC)
 	return result;
 }
 
-#define TIME_EXTEND 0
-
-int _nvp_extend_map(int file, size_t newcharlen)
-{
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
-	timing_type mmap_time;
-	NVP_START_TIMING(mmap_t, mmap_time);
-
-	size_t newmaplen;
-
-	if (newcharlen % MMAP_PAGE_SIZE)
-		newmaplen = (newcharlen / MMAP_PAGE_SIZE + 1) * MMAP_PAGE_SIZE;
-	else
-		newmaplen = newcharlen;
-	
-#if TIME_EXTEND
-	struct timeval start;
-	struct timeval end;
-	gettimeofday(&start, NULL);
-#endif
-	if (nvf->node->maplength >= newmaplen && nvf->node->data) {
-		return 0;
-	}
-	
-//	if (nvf->node->maplength > 0) {
-//		newmaplen *= 2;
-//	}
-
-	//int newmaplen = newcharlen + 1;
-
-	SANITYCHECK(nvf->node != NULL);
-	//SANITYCHECK(nvf->node->valid);
-	//SANITYCHECK(newmaplen > nvf->node->maplength);
-	SANITYCHECK(newmaplen > newcharlen);
-
-	if(newmaplen < nvf->node->maplength)
-	{
-		DEBUG("Just kidding, _nvp_extend_map is actually going to SHRINK the map from %li to %li\n", nvf->node->maplength, newmaplen);
-	}
-	else
-	{
-		DEBUG("_nvp_extend_map increasing map length from %li to %li\n", nvf->node->maplength, newmaplen);
-	}
-
-/*	// munmap first
-	if(nvf->node->data != NULL) {
-		DEBUG("Let's try munmapping every time.\n");
-
-		if(munmap(nvf->node->data, nvf->node->maplength))
-		{
-			ERROR("Couldn't munmap: %s\n", strerror(errno));
-		}
-	}
-*/
-	
-
-	int fd_with_max_perms = file; // may not be marked as valid
-	int max_perms = ((nvf->canRead)?PROT_READ:0)|((nvf->canWrite)?PROT_WRITE:0);
-
-	SANITYCHECK(max_perms);
-//	SANITYCHECK(FLAGS_INCLUDE(max_perms, PROT_READ));
-
-//	DEBUG("newcharlen is %li bytes (%li MB) (%li GB)\n", newcharlen, newcharlen/1024/1024, newcharlen/1024/1024/1024);
-
-	if( (!FLAGS_INCLUDE(max_perms, PROT_READ)) || (!FLAGS_INCLUDE(max_perms, PROT_WRITE)) )
-	{
-		int i;
-		for(i=0; i<OPEN_MAX; i++)
-		{
-			if( (_nvp_fd_lookup[i].valid) && (nvf->node==_nvp_fd_lookup[i].node) )
-			{
-				if( (!FLAGS_INCLUDE(max_perms, PROT_READ)) && (_nvp_fd_lookup[i].canRead) )
-				{
-					DEBUG("FD %i is adding read perms and is the new fd_with_max_perms (was %i, called with %i)\n", i, fd_with_max_perms, file);
-					max_perms = PROT_READ;
-					fd_with_max_perms = i;
-				}
-				if( (!FLAGS_INCLUDE(max_perms, PROT_WRITE)) && (_nvp_fd_lookup[i].canWrite) )
-				{
-					DEBUG("FD %i is adding write perms and is the new fd_with_max_perms, but may include O_APPEND (was %i, called with %i)\n", i, fd_with_max_perms, file);
-					max_perms = PROT_READ|PROT_WRITE;
-					fd_with_max_perms = i;
-				}
-				if( (_nvp_fd_lookup[i].canWrite) && (!_nvp_fd_lookup[i].append) )
-				{
-					DEBUG("FD %i is adding write perms and is the new fd_with_max_perms (was %i, called with %i)\n", i, fd_with_max_perms, file);
-					fd_with_max_perms = i;
-					break;
-				}
-			}
-		}
-	}
-
-	DEBUG("FD with max perms %i has read? %s   has write? %s\n", fd_with_max_perms, (_nvp_fd_lookup[fd_with_max_perms].canRead)?"yes":"no", (_nvp_fd_lookup[fd_with_max_perms].canWrite)?"yes":"no");
-
-	SANITYCHECK(FLAGS_INCLUDE(max_perms, PROT_READ));
-/*
-	if(nvf->node->maxPerms != max_perms)
-	{
-		DEBUG("Max perms for node %p are changing (to %i).\n", nvf->node, max_perms);
-	}
-*/
-	if(file != fd_with_max_perms) {
-		DEBUG("Was going to extend map with fd %i, but changed to %i because it has higher perms\n", file, fd_with_max_perms);
-	} else {
-		DEBUG("Going to extend map with the same fd that was called (%i)\n", file);
-	}
-
-	DEBUG("Requesting read perms? %s   Requesting write perms? %s\n", ((FLAGS_INCLUDE(max_perms, PROT_READ)?"yes":"no")), ((FLAGS_INCLUDE(max_perms, PROT_WRITE)?"yes":"no")));
-
-//	nvf->node->maxPerms = max_perms;
-
-#ifndef MAP_HUGETLB
-#define MAP_HUGETLB 0x40000 /* arch specific */
-#endif
-
-
-	// mmap replaces old maps where they intersect
-	DEBUG("Mmap length %lu\n", newmaplen);
-	char* result = (char*) FSYNC_MMAP
-	(
-		nvf->node->data,
-		newmaplen,
-		max_perms, //max_perms,
-		MAP_SHARED | MAP_POPULATE,
-		fd_with_max_perms, //fd_with_max_perms,
-		0
-	);
-
-/*
-	// mmap replaces old maps where they intersect
-	char* result = (char*) mmap
-	(
-		nvf->node->data,
-		newmaplen,
-		nvf->node->maxPerms, //max_perms,
-		MAP_SHARED,
-		nvf->fd, //fd_with_max_perms,
-		0
-	);
-*/
-
-	if( result == MAP_FAILED || result == NULL )
-	{
-		MSG("mmap failed for fd %i: %s\n", nvf->fd, strerror(errno));
-		MSG("Use posix operations for fd %i instead.\n", nvf->fd);
-		nvf->posix = 1;
-		return 0;
-	}
-
-	if( nvf->node->data != result )
-	{
-		DEBUG("mmap address changed from %p to %p\n", nvf->node->data, result);
-		nvf->node->data = result;
-	}
-	else
-	{
-		DEBUG("mmap address stayed the same (%p)\n", result);
-	}
-/*
-	MSG("Using MADV_HUGEPAGE\n");
-	madvise(result, newmaplen, MADV_HUGEPAGE);
-*/
-
-	#if MANUAL_PREFAULT
-	MSG("Walking the pages to make extra double sure they're not going to fault (from %p walking from %p to %p; map goes to %p)\n", nvf->node->data, 0, newcharlen, newmaplen);
-	DEBUG("NOTE: this has no way to check for file holes!  If there is a hole, and it tries to read it, it will SIGBUS.\n");
-	
-	char temp_rd_buf;
-
-	//size_t j;
-	uint64_t j;
-	for(j=0; j<newcharlen; j+=4096)
-	{
-		//_nvp_fileops->PREAD(nvf->fd, temp_rd_buf, 4096, j);
-	//	if(!(j%0x80000000)) {
-		//	DEBUG("Reading from base %p offset %p (address %p), going from 0x0 to %p\n", nvf->node->data, j, nvf->node->data+j, newcharlen);
-		//	DEBUG("distance from end of file: %li (%li MB)\n", (((int64_t)newcharlen) - ((int64_t)j)), (((int64_t)newcharlen) - ((int64_t)j))/1024/1024 );
-		//	DEBUG("distance from end of file: %li\n", (((int64_t)nvf->node->data)+((int64_t)newcharlen)) - (((int64_t)nvf->node->data)+j) );
-	//	}
-		temp_rd_buf = ((volatile char*)nvf->node->data)[j];
-	}
-	#endif
-
-	nvf->node->maplength = newmaplen;
-
-	DO_MSYNC(nvf);
-
-#if TIME_EXTEND
-	gettimeofday(&end, NULL);
-	long long unsigned int time_us;
-	time_us  = end.tv_sec-start.tv_sec;
-	time_us *= 1000000;
-	time_us += end.tv_usec-start.tv_usec;
-	MSG("Time to extend map for %p was %ius\n", nvf->node, time_us);
-#endif
-	DEBUG("Mmap result %p\n", nvf->node->data);
-	NVP_END_TIMING(mmap_t, mmap_time);
-	return 0;
-}
-
 void _nvp_test_invalidate_node(struct NVFile* nvf)
 {
 	struct NVNode* node = nvf->node;
@@ -2665,9 +2318,6 @@ void _nvp_test_invalidate_node(struct NVFile* nvf)
 void _nvp_SIGBUS_handler(int sig)
 {
 	ERROR("We got a SIGBUS (sig %i)!  This almost certainly means someone tried to access an area inside an mmaped region but past the length of the mmapped file.\n", sig);
-	#if MANUAL_PREFAULT
-	ERROR("   OR if this happened during prefault, we probably just tried to prefault a hole in the file, which isn't going to work.\n");
-	#endif
 //	_nvp_debug_handoff();
 	assert(0);
 }

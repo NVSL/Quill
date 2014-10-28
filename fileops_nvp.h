@@ -50,5 +50,74 @@ struct NVNode
 #define NVP_LOCK_NODE_WR(nvf)		NVP_LOCK_WR(	   nvf->node->lock)
 #define NVP_UNLOCK_NODE_WR(nvf)		NVP_LOCK_UNLOCK_WR(nvf->node->lock)
 
+/******************* MMAP ********************/
+
 #define IS_ERR(x) ((unsigned long)(x) >= (unsigned long)-4095)
+
+#define MAX_MMAP_SIZE	2097152
+#define	ALIGN_MMAP_DOWN(addr)	((addr) & ~(MAX_MMAP_SIZE - 1))
+
+#define DO_ALIGNMENT_CHECKS 0
+
+#define DO_MSYNC(nvf) do{ \
+	DEBUG("NOT doing a msync\n"); }while(0)
+/*
+	DEBUG("Doing a msync on fd %i (node %p)\n", nvf->fd, nvf->node); \
+	if(msync(nvf->node->data, nvf->node->maplength, MS_SYNC|MS_INVALIDATE)) { \
+		ERROR("Failed to msync for fd %i\n", nvf->fd); \
+		assert(0); \
+	} }while(0)
+*/
+
+/******************* Checking ********************/
+
+#define NOSANITYCHECK 1
+#if NOSANITYCHECK
+	#define SANITYCHECK(x)
+#else
+	#define SANITYCHECK(x) if(UNLIKELY(!(x))) { ERROR("NVP_SANITY("#x") failed!\n"); exit(101); }
+#endif
+
+#define NVP_CHECK_NVF_VALID(nvf) do{ \
+	if(UNLIKELY(!nvf->valid)) { \
+		DEBUG("Invalid file descriptor: %i\n", file); \
+		errno = EBADF; \
+		NVP_UNLOCK_FD_RD(nvf, cpuid); \
+		return -1; \
+	} \
+	else \
+	{ \
+		DEBUG("this function is operating on node %p\n", nvf->node); \
+		SANITYCHECKNVF(nvf); \
+		DO_MSYNC(nvf); \
+	} \
+	} while(0)
+
+#define NVP_CHECK_NVF_VALID_WR(nvf) do{ \
+	if(UNLIKELY(!nvf->valid)) { \
+		DEBUG("Invalid file descriptor: %i\n", file); \
+		errno = EBADF; \
+		NVP_UNLOCK_FD_WR(nvf); \
+		return -1; \
+	} \
+	else \
+	{ \
+		DEBUG("this function is operating on node %p\n", nvf->node); \
+		SANITYCHECKNVF(nvf); \
+		DO_MSYNC(nvf); \
+	} \
+	} while(0)
+
+#define SANITYCHECKNVF(nvf) \
+		SANITYCHECK(nvf->valid); \
+		SANITYCHECK(nvf->node != NULL); \
+		SANITYCHECK(nvf->fd >= 0); \
+		SANITYCHECK(nvf->fd < OPEN_MAX); \
+		SANITYCHECK(nvf->offset != NULL); \
+		SANITYCHECK(*nvf->offset >= 0); \
+		SANITYCHECK(nvf->serialno != 0); \
+		SANITYCHECK(nvf->serialno == nvf->node->serialno); \
+		SANITYCHECK(nvf->node->length >=0); \
+		SANITYCHECK(nvf->node->maplength >= nvf->node->length); \
+		SANITYCHECK(nvf->node->data != NULL)
 
