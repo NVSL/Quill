@@ -16,13 +16,6 @@
 #include "fileops_nvp.h"
 
 
-struct timezone;
-struct timeval;
-int gettimeofday(struct timeval *tv, struct timezone *tz);
-
-volatile size_t _nvp_wr_extended;
-volatile size_t _nvp_wr_total;
-
 BOOST_PP_SEQ_FOR_EACH(DECLARE_WITHOUT_ALIAS_FUNCTS_IWRAP, _nvp_, ALLOPS_WPAREN)
 
 RETT_OPEN _nvp_OPEN(INTF_OPEN);
@@ -72,6 +65,9 @@ MODULE_REGISTRATION_F("nvp", _nvp_, _nvp_init2(); );
 
 BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_HAS_FD_IWRAP, placeholder, (ACCEPT))
 BOOST_PP_SEQ_FOR_EACH(NVP_WRAP_NO_FD_IWRAP, placeholder, (PIPE) (FORK) (SOCKET))
+
+
+/* ============================= memcpy =============================== */
 
 extern long copy_user_nocache(void *dst, const void *src, unsigned size, int zerorest);
 
@@ -189,7 +185,8 @@ static char* memcpy1(char *to, char *from, size_t n)
 }
 
 
-//////////////////////////
+
+/* ====================== Memory operation policy ======================= */
 
 // modifications to support different FSYNC policies
 //#define MEMCPY memcpy
@@ -216,7 +213,7 @@ static char* memcpy1(char *to, char *from, size_t n)
 #elif FSYNC_POLICY == FSYNC_POLICY_FLUSH_ON_FSYNC
 	#define FSYNC_MEMCPY MEMCPY
 	#define FSYNC_MMAP MMAP
-	#define FSYNC_FSYNC fsync_fsync_flush_on_fsync(nvf)
+	#define FSYNC_FSYNC fsync_flush_on_fsync(nvf)
 #elif FSYNC_POLICY == FSYNC_POLICY_UNCACHEABLE_MAP
 	#define FSYNC_MEMCPY MEMCPY
 	#define FSYNC_MMAP mmap_fsync_uncacheable_map
@@ -231,9 +228,8 @@ static char* memcpy1(char *to, char *from, size_t n)
 	#define FSYNC_FSYNC _mm_mfence()
 #endif
 
-// void *mmap(void *start, size_t length, int prot, int flags, int fd, off_t offset);
-// void *memcpy(void *dest, const void *src, size_t n);
-// int fsync(int fd);
+
+/* ============================= Fsync =============================== */
 
 static inline void fsync_flush_on_fsync(struct NVFile* nvf)
 {
@@ -259,7 +255,7 @@ void *memcpy_fsync_nontemporal_writes(void *dest, const void *src, size_t n)
 
 	_mm_mfence();
 
-return NULL;
+	return NULL;
 //	return result;
 }
 
@@ -276,13 +272,6 @@ void *memcpy_fsync_flush_on_write(void *dest, const void *src, size_t n)
 	return result;
 }
 
-//////////////////////////
-
-#define TIME_READ_MEMCPY 0
-#if TIME_READ_MEMCPY
-long long unsigned int total_memcpy_cycles = 0;
-void report_memcpy_usec(void) { printf("Total memcpy time: %llu cycles: %f seconds\n", total_memcpy_cycles, ((float)(total_memcpy_cycles))/(2.27f*1024*1024*1024) ); }
-#endif
 
 /* ============================= Timing =============================== */
 
@@ -397,6 +386,8 @@ unsigned long long memcpy_read_size;
 unsigned long long memcpy_write_size;
 unsigned long long posix_read_size;
 unsigned long long posix_write_size;
+volatile size_t _nvp_wr_extended;
+volatile size_t _nvp_wr_total;
 
 void nvp_print_io_stats(void)
 {
@@ -420,6 +411,8 @@ void nvp_print_io_stats(void)
 		num_posix_write ? posix_write_size / num_posix_write : 0);
 	printf("write extends %lu, total %lu\n", _nvp_wr_extended, _nvp_wr_total);
 }
+
+/* ========================== Internal methods =========================== */
 
 void nvp_cleanup_node(struct NVNode *node, int free_root);
 
@@ -456,16 +449,12 @@ void _nvp_SIGUSR1_handler(int sig)
 
 void _nvp_init2(void)
 {
-	#if TIME_READ_MEMCPY
-//	atexit(report_memcpy_usec);
-	#endif
-
 	assert(!posix_memalign(((void**)&_nvp_zbuf), 4096, 4096));
 
 	_nvp_fd_lookup = (struct NVFile*) calloc(OPEN_MAX, sizeof(struct NVFile));
 
 	int i;
-	for(i=0; i<OPEN_MAX; i++) {
+	for(i = 0; i < OPEN_MAX; i++) {
 		_nvp_fd_lookup[i].valid = 0;
 		NVP_LOCK_INIT(_nvp_fd_lookup[i].lock);
 	}
@@ -487,14 +476,7 @@ void _nvp_init2(void)
 	/* For filebench */
 	signal(SIGUSR1, _nvp_SIGUSR1_handler);
 
-	//TODO
-	/*
-	#define GLIBC_LOC ""
-	MSG("Importing memcpy from %s\n", GLIBC_LOC);
-	*/
-
 	atexit(nvp_exit_handler);
-//	_nvp_debug_handoff();
 }
 
 void nvp_free_btree(unsigned long *root, unsigned long height)
@@ -634,617 +616,6 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 out:
 	NVP_END_TIMING(get_node_t, get_node_time);
 	return node;
-}
-
-RETT_OPEN _nvp_OPEN(INTF_OPEN)
-{
-	CHECK_RESOLVE_FILEOPS(_nvp_);
-	timing_type open_time, posix_open_time;
-	NVP_START_TIMING(open_t, open_time);
-
-	if(path==NULL) {
-		DEBUG("Invalid path.\n");
-		errno = EINVAL;
-		NVP_END_TIMING(open_t, open_time);
-		return -1;
-	}
-	
-	DEBUG("_nvp_OPEN(%s)\n", path);
-	num_open++;
-	
-	DEBUG("Attempting to _nvp_OPEN the file \"%s\" with the following flags (0x%X): ", path, oflag);
-
-	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
-		DEBUG_P("O_RDWR ");
-	} else if(FLAGS_INCLUDE(oflag,O_WRONLY)) {
-		DEBUG_P("O_WRONLY ");
-	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
-		DEBUG_P("O_RDONLY ");
-	}
-	DUMP_FLAGS(oflag,O_APPEND);
-	DUMP_FLAGS(oflag,O_CREAT);
-	DUMP_FLAGS(oflag,O_TRUNC);
-	DUMP_FLAGS(oflag,O_EXCL);
-	DUMP_FLAGS(oflag,O_SYNC);
-	DUMP_FLAGS(oflag,O_ASYNC);
-	DUMP_FLAGS(oflag,O_DSYNC);
-	DUMP_FLAGS(oflag,O_FSYNC);
-	DUMP_FLAGS(oflag,O_RSYNC);
-	DUMP_FLAGS(oflag,O_NOCTTY);
-	DUMP_FLAGS(oflag,O_NDELAY);
-	DUMP_FLAGS(oflag,O_NONBLOCK);
-	DUMP_FLAGS(oflag,O_DIRECTORY);
-	DUMP_FLAGS(oflag,O_LARGEFILE);
-	DUMP_FLAGS(oflag,O_NOATIME);
-	DUMP_FLAGS(oflag,O_DIRECT);
-	DUMP_FLAGS(oflag,O_NOFOLLOW);
-	//DUMP_FLAGS(oflag,O_SHLOCK);
-	//DUMP_FLAGS(oflag,O_EXLOCK);
-
-	DEBUG_P("\n");
-
-	struct stat file_st;
-
-	if(access(path, F_OK)) // file doesn't exist
-	{
-		if(FLAGS_INCLUDE(oflag, O_CREAT))
-		{
-			DEBUG("File does not exist and is set to be created.\n");
-		}
-		else
-		{
-			DEBUG("File does not exist and is not set to be created.  returning\n");
-			errno = ENOENT;
-			NVP_END_TIMING(open_t, open_time);
-			return -1;
-		}
-	}
-	else
-	{
-		if(stat(path, &file_st))
-		{
-			DEBUG("File exists but failed to get file stats!\n");
-			errno = EACCES;
-			NVP_END_TIMING(open_t, open_time);
-			return -1;
-		}
-
-		if(S_ISREG(file_st.st_mode))
-		{
-			DEBUG("File at path %s is a regular file, all is well.\n", path);
-		}
-		else
-		{
-			DEBUG("File at path %s is NOT a regular file!  INCONCEIVABLE\n", path);
-			assert(S_ISREG(file_st.st_mode));
-		}
-	}
-
-	int result;
-
-	struct NVNode* node = NULL;
-
-	if(stat(path, &file_st))
-	{
-		DEBUG("File didn't exist before calling open.\n");
-	}
-	else
-	{
-		DEBUG("File exists before we open it.  Let's get the lock first.\n");
-
-		// Find or allocate a NVNode
-		node = nvp_get_node(path, &file_st);
-		
-		NVP_LOCK_WR(node->lock);
-	}
-
-	NVP_START_TIMING(posix_open_t, posix_open_time);
-	if (FLAGS_INCLUDE(oflag, O_CREAT))
-	{
-		va_list arg;
-		va_start(arg, oflag);
-		int mode = va_arg(arg, int);
-		va_end(arg);
-		result = _nvp_fileops->OPEN(path, oflag & (~O_APPEND), mode);
-	} else {
-		result = _nvp_fileops->OPEN(path, oflag & (~O_APPEND));
-	}
-	NVP_END_TIMING(posix_open_t, posix_open_time);
-
-	if(result<0)
-	{
-		DEBUG("_nvp_OPEN->%s_OPEN failed: %s\n", _nvp_fileops->name, strerror(errno));
-		NVP_END_TIMING(open_t, open_time);
-		return result;
-	}	
-
-	SANITYCHECK(&_nvp_fd_lookup[result] != NULL);
-	
-	struct NVFile* nvf = &_nvp_fd_lookup[result];
-	NVP_LOCK_FD_WR(nvf);
-
-	DEBUG("_nvp_OPEN succeeded for path %s: fd %i returned.  filling in file info\n", path, result);
-
-	if(_nvp_fd_lookup[result].valid)
-	{
-		ERROR("There is already a file open with that FD (%i)!\n", result);
-		assert(0);
-	}
-	else
-	{
-		DEBUG("There was not already an NVFile for fd %i (that's good)\n", result);
-	}
-
-	SANITYCHECK(!access(path, F_OK)); // file exists
-//	if(FLAGS_INCLUDE(oflag, O_RDONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, R_OK)); } else { DEBUG("Read not requested\n"); }
-//	if(FLAGS_INCLUDE(oflag, O_WRONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, W_OK)); } else { DEBUG("Write not requested\n"); }
-
-	if(stat(path, &file_st))
-	{
-		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
-		assert(0);
-	}
-	else 
-	{
-		DEBUG("Stat successful for newly opened file %s (fd %i)\n", path, result);
-	}
-
-	if(node == NULL)
-	{
-		DEBUG("We created the file.  Let's check and make sure someone else hasn't already created the node.\n");
-
-		// Find or allocate a NVNode
-		node = nvp_get_node(path, &file_st);
-		
-		NVP_LOCK_WR(node->lock);
-	}
-	if(FLAGS_INCLUDE(oflag, O_TRUNC))
-	{
-		if(file_st.st_size != 0)
-		{
-			WARNING("O_TRUNC was set, but after %s->OPEN, file length was not 0!\n", _nvp_fileops->name);
-			WARNING("This is probably the result of another thread modifying the underlying node before we could get a lock on it.\n");
-			//assert(0);
-		}
-		else
-		{
-			DEBUG("O_TRUNC was set, and after %s->OPEN file length was 0 (as it should be).\n", _nvp_fileops->name);
-		}
-	}
-
-	nvf->fd = result;
-	
-	nvf->serialno = file_st.st_ino;
-
-//	if (nvf->node != node)
-//		free(nvf->node);
-
-	nvf->node = node;
-	nvf->posix = 0;
-
-	int index = nvf->serialno % 1024;
-	if (_nvp_ino_lookup[index] == 0)
-		_nvp_ino_lookup[index] = result;
-
-	// Set FD permissions
-	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
-		DEBUG("oflag (%i) specifies O_RDWR for fd %i\n", oflag, result);
-		nvf->canRead = 1;
-		nvf->canWrite = 1;
-	} else if(oflag&O_WRONLY) {
-		DEBUG("oflag (%i) specifies O_WRONLY for fd %i\n", oflag, result);
-		#if 0
-		oflag |= O_RDWR;
-		nvf->canRead = 1;
-		nvf->canWrite = 1;
-		#else
-		MSG("File %s is opened O_WRONLY.\n", path);
-		MSG("Does not support mmap, use posix instead.\n");
-		nvf->posix = 1;
-		nvf->canRead = 0;
-		nvf->canWrite = 1;
-		NVP_UNLOCK_NODE_WR(nvf);
-		NVP_UNLOCK_FD_WR(nvf);
-		NVP_END_TIMING(open_t, open_time);
-		return nvf->fd;
-		#endif
-	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
-		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n", oflag, result);
-		nvf->canRead = 1;
-		nvf->canWrite = 0;
-	} else {
-		DEBUG("File permissions don't include read or write!\n");
-		nvf->canRead = 0;
-		nvf->canWrite = 0;
-		assert(0);
-	}
-	
-	if(FLAGS_INCLUDE(oflag, O_APPEND)) {
-		nvf->append = 1;
-	} else {
-		nvf->append = 0;
-	}
-
-	SANITYCHECK(nvf->node != NULL);
-	SANITYCHECK(nvf->node->length >= 0);
-
-	if(FLAGS_INCLUDE(oflag, O_TRUNC) && nvf->node->length)
-	{
-		DEBUG("We just opened a file with O_TRUNC that was already open with nonzero length %li.  Updating length.\n", nvf->node->length);
-		nvf->node->length = 0;
-	}
-/*
-	if(stat(path, &file_st)) // in case of multithreading it's good to update.  // TODO this is obviously a race condition...
-	{
-		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
-		assert(0);
-	}
-*/
-	SANITYCHECK(nvf->node->length == file_st.st_size);
-
-	DEBUG("Meh, why not allocate a new map every time\n");
-	//nvf->node->maplength = -1;
-	nvf->posix = 0;
-	nvf->debug = 0;
-
-	/* This is a nasty workaround for FIO */
-	if (path[0] == '/' && path[1] == 's'
-			&& path[2] == 'y' && path[3] == 's') {
-		nvf->posix = 1;
-		MSG("A Posix Path: %s\n", path);
-	}
-
-	/* For BDB log file, workaround the fdsync issue */
-	if (path[29] == 'l' && path[30] == 'o' && path[31] == 'g') {
-		nvf->debug = 1;
-//		MSG("A Posix Path: %s\n", path);
-	}
-
-	SANITYCHECK(nvf->node->length >= 0);
-//	SANITYCHECK(nvf->node->maplength >= nvf->node->length);
-
-	nvf->offset = (size_t*)calloc(1, sizeof(int));
-	*nvf->offset = 0;
-
-	if(FLAGS_INCLUDE(oflag, O_DIRECT) && (DO_ALIGNMENT_CHECKS)) {
-		nvf->aligned = 1;
-	} else {
-		nvf->aligned = 0;
-	}
-
-	nvf->valid = 1;
-	//nvf->node->valid = 1;
-	
-	DO_MSYNC(nvf);
-
-	NVP_UNLOCK_NODE_WR(nvf);
-	NVP_UNLOCK_FD_WR(nvf);
-
-	errno = 0;
-	NVP_END_TIMING(open_t, open_time);
-	return nvf->fd;
-}
-
-RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
-{
-	CHECK_RESOLVE_FILEOPS(_nvp_);
-	timing_type close_time, posix_close_time;
-	RETT_CLOSE result;
-	NVP_START_TIMING(close_t, close_time);
-
-	DEBUG("_nvp_CLOSE(%i)\n", file);
-	num_close++;
-
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
-
-	if (nvf->posix) {
-		nvf->valid = 0;
-		nvf->posix = 0;
-		nvf->node->reference--;
-		if (nvf->node->reference == 0) {
-			nvf->node->serialno = 0;
-			int index = nvf->serialno % 1024;
-			_nvp_ino_lookup[index] = 0;
-		}
-		nvf->serialno = 0;
-//		nvf->node = NULL;
-		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
-		NVP_START_TIMING(posix_close_t, posix_close_time);
-		result = _nvp_fileops->CLOSE(CALL_CLOSE);
-		NVP_END_TIMING(posix_close_t, posix_close_time);
-		NVP_END_TIMING(close_t, close_time);
-		return result;
-	}
-
-	pthread_spin_lock(&node_lookup_lock);
-	//int iter;
-	nvf->node->reference--;
-	if (nvf->node->reference == 0)
-		nvf->node->serialno = 0;
-	pthread_spin_unlock(&node_lookup_lock);
-//	nvf->node = NULL;
-
-	//_nvp_test_invalidate_node(nvf);
-
-	NVP_LOCK_FD_WR(nvf);
-	NVP_CHECK_NVF_VALID_WR(nvf);
-	NVP_LOCK_NODE_WR(nvf);
-
-	nvf->valid = 0;
-	if (nvf->node->reference == 0) {
-		int index = nvf->serialno % 1024;
-		_nvp_ino_lookup[index] = 0;
-		DEBUG("Close Cleanup node for %d\n", file);
-		nvp_cleanup_node(nvf->node, 0);
-	}
-	nvf->serialno = 0;
-
-	NVP_START_TIMING(posix_close_t, posix_close_time);
-	result = _nvp_fileops->CLOSE(CALL_CLOSE);
-	NVP_END_TIMING(posix_close_t, posix_close_time);
-
-	NVP_UNLOCK_NODE_WR(nvf);
-	NVP_UNLOCK_FD_WR(nvf);
-	NVP_END_TIMING(close_t, close_time);
-
-	return result;
-}
-
-static ssize_t _nvp_check_read_size_valid(size_t count)
-{ 
-	if(count == 0)
-	{
-		DEBUG("Requested a read of 0 length.  No problem\n");
-		return 0;
-	}
-	else if(count < 0)
-	{
-		DEBUG("Requested read of negative bytes (%li)\n", count);
-		errno = EINVAL;
-		return -1;
-	}
-
-	return count;
-}
-
-static ssize_t _nvp_check_write_size_valid(size_t count)
-{
-	if(count == 0)
-	{
-		DEBUG("Requested a write of 0 bytes.  No problem\n");
-		return 0;
-	}
-
-	if(((signed long long int)count) < 0)
-	{
-		DEBUG("Requested a write of %li < 0 bytes.\n", (signed long long int)count);
-		errno = EINVAL;
-		return -1;
-	}
-
-	return count;
-}
-
-RETT_READ _nvp_READ(INTF_READ)
-{
-	DEBUG("_nvp_READ %d\n", file);
-	timing_type read_time;
-	RETT_READ result;
-	NVP_START_TIMING(read_t, read_time);
-
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
-
-	if (nvf->posix) {
-		DEBUG("Call posix READ for fd %d\n", nvf->fd);
-		result = _nvp_fileops->READ(CALL_READ);
-		NVP_END_TIMING(read_t, read_time);
-		read_size += result;
-		num_posix_read++;
-		posix_read_size += result;
-		return result;
-	}
-
-	result = _nvp_check_read_size_valid(length);
-	if (result <= 0)
-		return result;
-
-	int cpuid = GET_CPUID();
-
-	NVP_LOCK_FD_RD(nvf, cpuid); // TODO
-	NVP_CHECK_NVF_VALID_WR(nvf);
-
-	NVP_LOCK_NODE_RD(nvf, cpuid);
-
-	result = _nvp_do_pread(CALL_READ,
-			__sync_fetch_and_add(nvf->offset, length), 0, cpuid);
-
-	NVP_UNLOCK_NODE_RD(nvf, cpuid);
-	
-	if(result == length)	{
-		DEBUG("PREAD succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
-	}
-	else if (result <= 0){
-		DEBUG("_nvp_READ: PREAD failed; not changing offset. (returned %i)\n", result);
-		// assert(0); // TODO: this is for testing only
-		__sync_fetch_and_sub(nvf->offset, length);
-	} else {
-		DEBUG("_nvp_READ: PREAD failed; Not fully read. (returned %i)\n", result);
-		// assert(0); // TODO: this is for testing only
-		__sync_fetch_and_sub(nvf->offset, length - result);
-	}
-
-	NVP_UNLOCK_FD_RD(nvf, cpuid);
-
-	NVP_END_TIMING(read_t, read_time);
-	num_read++;
-	read_size += result;
-
-	return result;
-}
-
-RETT_WRITE _nvp_WRITE(INTF_WRITE)
-{
-	DEBUG("_nvp_WRITE %d\n", file);
-	num_write++;
-	timing_type write_time;
-	RETT_WRITE result;
-	NVP_START_TIMING(write_t, write_time);
-
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
-
-	if (nvf->posix) {
-		DEBUG("Call posix WRITE for fd %d\n", nvf->fd);
-		result = _nvp_fileops->WRITE(CALL_WRITE);
-		NVP_END_TIMING(write_t, write_time);
-		write_size += result;
-		num_posix_write++;
-		posix_write_size += result;
-		return result;
-	}
-
-	//int iter;
-	int cpuid = GET_CPUID();
-	result = _nvp_check_write_size_valid(length);
-	if (result <= 0)
-		return result;
-
-	NVP_LOCK_FD_RD(nvf, cpuid); // TODO
-	NVP_CHECK_NVF_VALID_WR(nvf);
-	NVP_LOCK_NODE_RD(nvf, cpuid); //TODO
-
-	result = _nvp_do_pwrite(CALL_WRITE,
-			__sync_fetch_and_add(nvf->offset, length), 0, cpuid);
-
-	NVP_UNLOCK_NODE_RD(nvf, cpuid);
-
-	if(result >= 0)
-	{
-		if(nvf->append)
-		{
-			size_t temp_offset = __sync_fetch_and_add(nvf->offset, 0);
-			DEBUG("PWRITE succeeded and append == true.  Setting offset to end...\n"); 
-			assert(_nvp_do_seek64(nvf->fd, 0, SEEK_END) != (RETT_SEEK64)-1);
-			DEBUG("PWRITE: offset changed from %li to %li\n", temp_offset, *nvf->offset);
-			temp_offset = 4; // touch temp_offset
-		}
-		else
-		{
-			DEBUG("PWRITE succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
-//			*nvf->offset += result;
-		}
-	}
-	else {
-		DEBUG("_nvp_WRITE: PWRITE failed; not changing offset. (returned %i)\n", result);
-		// assert(0); // TODO: this is for testing only
-	}
-
-	DEBUG("About to return from _nvp_WRITE with ret val %i (errno %i).  file len: %li, file off: %li, map len: %li\n", result, errno, nvf->node->length, nvf->offset, nvf->node->maplength);
-
-	DO_MSYNC(nvf);
-
-	NVP_UNLOCK_FD_RD(nvf, cpuid);
-
-	NVP_END_TIMING(write_t, write_time);
-	write_size += result;
-
-	return result;
-}
-
-RETT_PREAD _nvp_PREAD(INTF_PREAD)
-{
-	CHECK_RESOLVE_FILEOPS(_nvp_);
-
-	DEBUG("_nvp_PREAD %d\n", file);
-	num_read++;
-	timing_type read_time;
-	RETT_PREAD result;
-	NVP_START_TIMING(pread_t, read_time);
-
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
-
-	if (nvf->posix) {
-		DEBUG("Call posix PREAD for fd %d\n", nvf->fd);
-		result = _nvp_fileops->PREAD(CALL_PREAD);
-		NVP_END_TIMING(pread_t, read_time);
-		read_size += result;
-		num_posix_read++;
-		posix_read_size += result;
-		return result;
-	}
-
-	result = _nvp_check_read_size_valid(count);
-	if (result <= 0)
-		return result;
-
-	int cpuid = GET_CPUID();
-	NVP_LOCK_FD_RD(nvf, cpuid);
-	NVP_CHECK_NVF_VALID(nvf);
-	NVP_LOCK_NODE_RD(nvf, cpuid);
-
-	result = _nvp_do_pread(CALL_PREAD, 0, cpuid);
-
-	NVP_UNLOCK_NODE_RD(nvf, cpuid);
-	NVP_UNLOCK_FD_RD(nvf, cpuid);
-
-	NVP_END_TIMING(pread_t, read_time);
-	read_size += result;
-
-	return result;
-}
-
-RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
-{
-	CHECK_RESOLVE_FILEOPS(_nvp_);
-
-	DEBUG("_nvp_PWRITE %d\n", file);
-	num_write++;
-	timing_type write_time;
-	RETT_PWRITE result;
-	NVP_START_TIMING(pwrite_t, write_time);
-
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
-
-	if (nvf->posix) {
-		DEBUG("Call posix PWRITE for fd %d\n", nvf->fd);
-		result = _nvp_fileops->PWRITE(CALL_PWRITE);
-		NVP_END_TIMING(pwrite_t, write_time);
-		write_size += result;
-		num_posix_write++;
-		posix_write_size += result;
-		return result;
-	}
-
-	result = _nvp_check_write_size_valid(count);
-	if (result <= 0)
-		return result;
-	
-	int cpuid = GET_CPUID();
-	NVP_LOCK_FD_RD(nvf, cpuid);
-	NVP_CHECK_NVF_VALID(nvf);
-	NVP_LOCK_NODE_RD(nvf, cpuid);
-	
-	ssize_t available_length = (nvf->node->length) - offset;
-
-	if(count > available_length) {
-		DEBUG("Promoting PWRITE lock to WRLOCK\n");
-		NVP_UNLOCK_NODE_RD(nvf, cpuid);
-		NVP_LOCK_NODE_WR(nvf);
-		
-		result = _nvp_do_pwrite(CALL_PWRITE, 1, cpuid);
-
-		NVP_UNLOCK_NODE_WR(nvf);
-	}
-	else {
-		result = _nvp_do_pwrite(CALL_PWRITE, 0, cpuid);
-		NVP_UNLOCK_NODE_RD(nvf, cpuid);
-	}
-
-	NVP_UNLOCK_FD_RD(nvf, cpuid);
-
-	NVP_END_TIMING(pwrite_t, write_time);
-	write_size += result;
-
-	return result;
 }
 
 static unsigned long calculate_capacity(unsigned int height)
@@ -1786,6 +1157,617 @@ out:
 	NVP_END_TIMING(do_pwrite_t, do_pwrite_time);
 	return write_count;
 }
+
+/* ========================== POSIX API methods =========================== */
+
+RETT_OPEN _nvp_OPEN(INTF_OPEN)
+{
+	CHECK_RESOLVE_FILEOPS(_nvp_);
+	timing_type open_time, posix_open_time;
+	NVP_START_TIMING(open_t, open_time);
+
+	if(path==NULL) {
+		DEBUG("Invalid path.\n");
+		errno = EINVAL;
+		NVP_END_TIMING(open_t, open_time);
+		return -1;
+	}
+	
+	DEBUG("_nvp_OPEN(%s)\n", path);
+	num_open++;
+	
+	DEBUG("Attempting to _nvp_OPEN the file \"%s\" with the following flags (0x%X): ", path, oflag);
+
+	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
+		DEBUG_P("O_RDWR ");
+	} else if(FLAGS_INCLUDE(oflag,O_WRONLY)) {
+		DEBUG_P("O_WRONLY ");
+	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
+		DEBUG_P("O_RDONLY ");
+	}
+	DUMP_FLAGS(oflag,O_APPEND);
+	DUMP_FLAGS(oflag,O_CREAT);
+	DUMP_FLAGS(oflag,O_TRUNC);
+	DUMP_FLAGS(oflag,O_EXCL);
+	DUMP_FLAGS(oflag,O_SYNC);
+	DUMP_FLAGS(oflag,O_ASYNC);
+	DUMP_FLAGS(oflag,O_DSYNC);
+	DUMP_FLAGS(oflag,O_FSYNC);
+	DUMP_FLAGS(oflag,O_RSYNC);
+	DUMP_FLAGS(oflag,O_NOCTTY);
+	DUMP_FLAGS(oflag,O_NDELAY);
+	DUMP_FLAGS(oflag,O_NONBLOCK);
+	DUMP_FLAGS(oflag,O_DIRECTORY);
+	DUMP_FLAGS(oflag,O_LARGEFILE);
+	DUMP_FLAGS(oflag,O_NOATIME);
+	DUMP_FLAGS(oflag,O_DIRECT);
+	DUMP_FLAGS(oflag,O_NOFOLLOW);
+	//DUMP_FLAGS(oflag,O_SHLOCK);
+	//DUMP_FLAGS(oflag,O_EXLOCK);
+
+	DEBUG_P("\n");
+
+	struct stat file_st;
+
+	if(access(path, F_OK)) // file doesn't exist
+	{
+		if(FLAGS_INCLUDE(oflag, O_CREAT))
+		{
+			DEBUG("File does not exist and is set to be created.\n");
+		}
+		else
+		{
+			DEBUG("File does not exist and is not set to be created.  returning\n");
+			errno = ENOENT;
+			NVP_END_TIMING(open_t, open_time);
+			return -1;
+		}
+	}
+	else
+	{
+		if(stat(path, &file_st))
+		{
+			DEBUG("File exists but failed to get file stats!\n");
+			errno = EACCES;
+			NVP_END_TIMING(open_t, open_time);
+			return -1;
+		}
+
+		if(S_ISREG(file_st.st_mode))
+		{
+			DEBUG("File at path %s is a regular file, all is well.\n", path);
+		}
+		else
+		{
+			DEBUG("File at path %s is NOT a regular file!  INCONCEIVABLE\n", path);
+			assert(S_ISREG(file_st.st_mode));
+		}
+	}
+
+	int result;
+
+	struct NVNode* node = NULL;
+
+	if(stat(path, &file_st))
+	{
+		DEBUG("File didn't exist before calling open.\n");
+	}
+	else
+	{
+		DEBUG("File exists before we open it.  Let's get the lock first.\n");
+
+		// Find or allocate a NVNode
+		node = nvp_get_node(path, &file_st);
+		
+		NVP_LOCK_WR(node->lock);
+	}
+
+	NVP_START_TIMING(posix_open_t, posix_open_time);
+	if (FLAGS_INCLUDE(oflag, O_CREAT))
+	{
+		va_list arg;
+		va_start(arg, oflag);
+		int mode = va_arg(arg, int);
+		va_end(arg);
+		result = _nvp_fileops->OPEN(path, oflag & (~O_APPEND), mode);
+	} else {
+		result = _nvp_fileops->OPEN(path, oflag & (~O_APPEND));
+	}
+	NVP_END_TIMING(posix_open_t, posix_open_time);
+
+	if(result<0)
+	{
+		DEBUG("_nvp_OPEN->%s_OPEN failed: %s\n", _nvp_fileops->name, strerror(errno));
+		NVP_END_TIMING(open_t, open_time);
+		return result;
+	}	
+
+	SANITYCHECK(&_nvp_fd_lookup[result] != NULL);
+	
+	struct NVFile* nvf = &_nvp_fd_lookup[result];
+	NVP_LOCK_FD_WR(nvf);
+
+	DEBUG("_nvp_OPEN succeeded for path %s: fd %i returned.  filling in file info\n", path, result);
+
+	if(_nvp_fd_lookup[result].valid)
+	{
+		ERROR("There is already a file open with that FD (%i)!\n", result);
+		assert(0);
+	}
+	else
+	{
+		DEBUG("There was not already an NVFile for fd %i (that's good)\n", result);
+	}
+
+	SANITYCHECK(!access(path, F_OK)); // file exists
+//	if(FLAGS_INCLUDE(oflag, O_RDONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, R_OK)); } else { DEBUG("Read not requested\n"); }
+//	if(FLAGS_INCLUDE(oflag, O_WRONLY) || FLAGS_INCLUDE(oflag, O_RDWR)) { SANITYCHECK(!access(path, W_OK)); } else { DEBUG("Write not requested\n"); }
+
+	if(stat(path, &file_st))
+	{
+		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
+		assert(0);
+	}
+	else 
+	{
+		DEBUG("Stat successful for newly opened file %s (fd %i)\n", path, result);
+	}
+
+	if(node == NULL)
+	{
+		DEBUG("We created the file.  Let's check and make sure someone else hasn't already created the node.\n");
+
+		// Find or allocate a NVNode
+		node = nvp_get_node(path, &file_st);
+		
+		NVP_LOCK_WR(node->lock);
+	}
+	if(FLAGS_INCLUDE(oflag, O_TRUNC))
+	{
+		if(file_st.st_size != 0)
+		{
+			WARNING("O_TRUNC was set, but after %s->OPEN, file length was not 0!\n", _nvp_fileops->name);
+			WARNING("This is probably the result of another thread modifying the underlying node before we could get a lock on it.\n");
+			//assert(0);
+		}
+		else
+		{
+			DEBUG("O_TRUNC was set, and after %s->OPEN file length was 0 (as it should be).\n", _nvp_fileops->name);
+		}
+	}
+
+	nvf->fd = result;
+	
+	nvf->serialno = file_st.st_ino;
+
+	nvf->node = node;
+	nvf->posix = 0;
+
+	int index = nvf->serialno % 1024;
+	if (_nvp_ino_lookup[index] == 0)
+		_nvp_ino_lookup[index] = result;
+
+	// Set FD permissions
+	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
+		DEBUG("oflag (%i) specifies O_RDWR for fd %i\n", oflag, result);
+		nvf->canRead = 1;
+		nvf->canWrite = 1;
+	} else if(oflag&O_WRONLY) {
+		DEBUG("oflag (%i) specifies O_WRONLY for fd %i\n", oflag, result);
+		#if 0
+		oflag |= O_RDWR;
+		nvf->canRead = 1;
+		nvf->canWrite = 1;
+		#else
+		MSG("File %s is opened O_WRONLY.\n", path);
+		MSG("Does not support mmap, use posix instead.\n");
+		nvf->posix = 1;
+		nvf->canRead = 0;
+		nvf->canWrite = 1;
+		NVP_UNLOCK_NODE_WR(nvf);
+		NVP_UNLOCK_FD_WR(nvf);
+		NVP_END_TIMING(open_t, open_time);
+		return nvf->fd;
+		#endif
+	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
+		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n", oflag, result);
+		nvf->canRead = 1;
+		nvf->canWrite = 0;
+	} else {
+		DEBUG("File permissions don't include read or write!\n");
+		nvf->canRead = 0;
+		nvf->canWrite = 0;
+		assert(0);
+	}
+	
+	if(FLAGS_INCLUDE(oflag, O_APPEND)) {
+		nvf->append = 1;
+	} else {
+		nvf->append = 0;
+	}
+
+	SANITYCHECK(nvf->node != NULL);
+	SANITYCHECK(nvf->node->length >= 0);
+
+	if(FLAGS_INCLUDE(oflag, O_TRUNC) && nvf->node->length)
+	{
+		DEBUG("We just opened a file with O_TRUNC that was already open with nonzero length %li.  Updating length.\n", nvf->node->length);
+		nvf->node->length = 0;
+	}
+/*
+	if(stat(path, &file_st)) // in case of multithreading it's good to update.  // TODO this is obviously a race condition...
+	{
+		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
+		assert(0);
+	}
+*/
+	SANITYCHECK(nvf->node->length == file_st.st_size);
+
+	DEBUG("Meh, why not allocate a new map every time\n");
+	//nvf->node->maplength = -1;
+	nvf->posix = 0;
+	nvf->debug = 0;
+
+	/* This is a nasty workaround for FIO */
+	if (path[0] == '/' && path[1] == 's'
+			&& path[2] == 'y' && path[3] == 's') {
+		nvf->posix = 1;
+		MSG("A Posix Path: %s\n", path);
+	}
+
+	/* For BDB log file, workaround the fdsync issue */
+	if (path[29] == 'l' && path[30] == 'o' && path[31] == 'g') {
+		nvf->debug = 1;
+//		MSG("A Posix Path: %s\n", path);
+	}
+
+	SANITYCHECK(nvf->node->length >= 0);
+//	SANITYCHECK(nvf->node->maplength >= nvf->node->length);
+
+	nvf->offset = (size_t*)calloc(1, sizeof(int));
+	*nvf->offset = 0;
+
+	if(FLAGS_INCLUDE(oflag, O_DIRECT) && (DO_ALIGNMENT_CHECKS)) {
+		nvf->aligned = 1;
+	} else {
+		nvf->aligned = 0;
+	}
+
+	nvf->valid = 1;
+	//nvf->node->valid = 1;
+	
+	DO_MSYNC(nvf);
+
+	NVP_UNLOCK_NODE_WR(nvf);
+	NVP_UNLOCK_FD_WR(nvf);
+
+	errno = 0;
+	NVP_END_TIMING(open_t, open_time);
+	return nvf->fd;
+}
+
+RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
+{
+	CHECK_RESOLVE_FILEOPS(_nvp_);
+	timing_type close_time, posix_close_time;
+	RETT_CLOSE result;
+	NVP_START_TIMING(close_t, close_time);
+
+	DEBUG("_nvp_CLOSE(%i)\n", file);
+	num_close++;
+
+	struct NVFile* nvf = &_nvp_fd_lookup[file];
+
+	if (nvf->posix) {
+		nvf->valid = 0;
+		nvf->posix = 0;
+		nvf->node->reference--;
+		if (nvf->node->reference == 0) {
+			nvf->node->serialno = 0;
+			int index = nvf->serialno % 1024;
+			_nvp_ino_lookup[index] = 0;
+		}
+		nvf->serialno = 0;
+//		nvf->node = NULL;
+		DEBUG("Call posix CLOSE for fd %d\n", nvf->fd);
+		NVP_START_TIMING(posix_close_t, posix_close_time);
+		result = _nvp_fileops->CLOSE(CALL_CLOSE);
+		NVP_END_TIMING(posix_close_t, posix_close_time);
+		NVP_END_TIMING(close_t, close_time);
+		return result;
+	}
+
+	pthread_spin_lock(&node_lookup_lock);
+	//int iter;
+	nvf->node->reference--;
+	if (nvf->node->reference == 0)
+		nvf->node->serialno = 0;
+	pthread_spin_unlock(&node_lookup_lock);
+//	nvf->node = NULL;
+
+	//_nvp_test_invalidate_node(nvf);
+
+	NVP_LOCK_FD_WR(nvf);
+	NVP_CHECK_NVF_VALID_WR(nvf);
+	NVP_LOCK_NODE_WR(nvf);
+
+	nvf->valid = 0;
+	if (nvf->node->reference == 0) {
+		int index = nvf->serialno % 1024;
+		_nvp_ino_lookup[index] = 0;
+		DEBUG("Close Cleanup node for %d\n", file);
+		nvp_cleanup_node(nvf->node, 0);
+	}
+	nvf->serialno = 0;
+
+	NVP_START_TIMING(posix_close_t, posix_close_time);
+	result = _nvp_fileops->CLOSE(CALL_CLOSE);
+	NVP_END_TIMING(posix_close_t, posix_close_time);
+
+	NVP_UNLOCK_NODE_WR(nvf);
+	NVP_UNLOCK_FD_WR(nvf);
+	NVP_END_TIMING(close_t, close_time);
+
+	return result;
+}
+
+static ssize_t _nvp_check_read_size_valid(size_t count)
+{ 
+	if(count == 0)
+	{
+		DEBUG("Requested a read of 0 length.  No problem\n");
+		return 0;
+	}
+	else if(count < 0)
+	{
+		DEBUG("Requested read of negative bytes (%li)\n", count);
+		errno = EINVAL;
+		return -1;
+	}
+
+	return count;
+}
+
+static ssize_t _nvp_check_write_size_valid(size_t count)
+{
+	if(count == 0)
+	{
+		DEBUG("Requested a write of 0 bytes.  No problem\n");
+		return 0;
+	}
+
+	if(((signed long long int)count) < 0)
+	{
+		DEBUG("Requested a write of %li < 0 bytes.\n", (signed long long int)count);
+		errno = EINVAL;
+		return -1;
+	}
+
+	return count;
+}
+
+RETT_READ _nvp_READ(INTF_READ)
+{
+	DEBUG("_nvp_READ %d\n", file);
+	timing_type read_time;
+	RETT_READ result;
+	NVP_START_TIMING(read_t, read_time);
+
+	struct NVFile* nvf = &_nvp_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix READ for fd %d\n", nvf->fd);
+		result = _nvp_fileops->READ(CALL_READ);
+		NVP_END_TIMING(read_t, read_time);
+		read_size += result;
+		num_posix_read++;
+		posix_read_size += result;
+		return result;
+	}
+
+	result = _nvp_check_read_size_valid(length);
+	if (result <= 0)
+		return result;
+
+	int cpuid = GET_CPUID();
+
+	NVP_LOCK_FD_RD(nvf, cpuid); // TODO
+	NVP_CHECK_NVF_VALID_WR(nvf);
+
+	NVP_LOCK_NODE_RD(nvf, cpuid);
+
+	result = _nvp_do_pread(CALL_READ,
+			__sync_fetch_and_add(nvf->offset, length), 0, cpuid);
+
+	NVP_UNLOCK_NODE_RD(nvf, cpuid);
+	
+	if(result == length)	{
+		DEBUG("PREAD succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
+	}
+	else if (result <= 0){
+		DEBUG("_nvp_READ: PREAD failed; not changing offset. (returned %i)\n", result);
+		// assert(0); // TODO: this is for testing only
+		__sync_fetch_and_sub(nvf->offset, length);
+	} else {
+		DEBUG("_nvp_READ: PREAD failed; Not fully read. (returned %i)\n", result);
+		// assert(0); // TODO: this is for testing only
+		__sync_fetch_and_sub(nvf->offset, length - result);
+	}
+
+	NVP_UNLOCK_FD_RD(nvf, cpuid);
+
+	NVP_END_TIMING(read_t, read_time);
+	num_read++;
+	read_size += result;
+
+	return result;
+}
+
+RETT_WRITE _nvp_WRITE(INTF_WRITE)
+{
+	DEBUG("_nvp_WRITE %d\n", file);
+	num_write++;
+	timing_type write_time;
+	RETT_WRITE result;
+	NVP_START_TIMING(write_t, write_time);
+
+	struct NVFile* nvf = &_nvp_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix WRITE for fd %d\n", nvf->fd);
+		result = _nvp_fileops->WRITE(CALL_WRITE);
+		NVP_END_TIMING(write_t, write_time);
+		write_size += result;
+		num_posix_write++;
+		posix_write_size += result;
+		return result;
+	}
+
+	//int iter;
+	int cpuid = GET_CPUID();
+	result = _nvp_check_write_size_valid(length);
+	if (result <= 0)
+		return result;
+
+	NVP_LOCK_FD_RD(nvf, cpuid); // TODO
+	NVP_CHECK_NVF_VALID_WR(nvf);
+	NVP_LOCK_NODE_RD(nvf, cpuid); //TODO
+
+	result = _nvp_do_pwrite(CALL_WRITE,
+			__sync_fetch_and_add(nvf->offset, length), 0, cpuid);
+
+	NVP_UNLOCK_NODE_RD(nvf, cpuid);
+
+	if(result >= 0)
+	{
+		if(nvf->append)
+		{
+			size_t temp_offset = __sync_fetch_and_add(nvf->offset, 0);
+			DEBUG("PWRITE succeeded and append == true.  Setting offset to end...\n"); 
+			assert(_nvp_do_seek64(nvf->fd, 0, SEEK_END) != (RETT_SEEK64)-1);
+			DEBUG("PWRITE: offset changed from %li to %li\n", temp_offset, *nvf->offset);
+			temp_offset = 4; // touch temp_offset
+		}
+		else
+		{
+			DEBUG("PWRITE succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
+//			*nvf->offset += result;
+		}
+	}
+	else {
+		DEBUG("_nvp_WRITE: PWRITE failed; not changing offset. (returned %i)\n", result);
+		// assert(0); // TODO: this is for testing only
+	}
+
+	DEBUG("About to return from _nvp_WRITE with ret val %i (errno %i).  file len: %li, file off: %li, map len: %li\n", result, errno, nvf->node->length, nvf->offset, nvf->node->maplength);
+
+	DO_MSYNC(nvf);
+
+	NVP_UNLOCK_FD_RD(nvf, cpuid);
+
+	NVP_END_TIMING(write_t, write_time);
+	write_size += result;
+
+	return result;
+}
+
+RETT_PREAD _nvp_PREAD(INTF_PREAD)
+{
+	CHECK_RESOLVE_FILEOPS(_nvp_);
+
+	DEBUG("_nvp_PREAD %d\n", file);
+	num_read++;
+	timing_type read_time;
+	RETT_PREAD result;
+	NVP_START_TIMING(pread_t, read_time);
+
+	struct NVFile* nvf = &_nvp_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix PREAD for fd %d\n", nvf->fd);
+		result = _nvp_fileops->PREAD(CALL_PREAD);
+		NVP_END_TIMING(pread_t, read_time);
+		read_size += result;
+		num_posix_read++;
+		posix_read_size += result;
+		return result;
+	}
+
+	result = _nvp_check_read_size_valid(count);
+	if (result <= 0)
+		return result;
+
+	int cpuid = GET_CPUID();
+	NVP_LOCK_FD_RD(nvf, cpuid);
+	NVP_CHECK_NVF_VALID(nvf);
+	NVP_LOCK_NODE_RD(nvf, cpuid);
+
+	result = _nvp_do_pread(CALL_PREAD, 0, cpuid);
+
+	NVP_UNLOCK_NODE_RD(nvf, cpuid);
+	NVP_UNLOCK_FD_RD(nvf, cpuid);
+
+	NVP_END_TIMING(pread_t, read_time);
+	read_size += result;
+
+	return result;
+}
+
+RETT_PWRITE _nvp_PWRITE(INTF_PWRITE)
+{
+	CHECK_RESOLVE_FILEOPS(_nvp_);
+
+	DEBUG("_nvp_PWRITE %d\n", file);
+	num_write++;
+	timing_type write_time;
+	RETT_PWRITE result;
+	NVP_START_TIMING(pwrite_t, write_time);
+
+	struct NVFile* nvf = &_nvp_fd_lookup[file];
+
+	if (nvf->posix) {
+		DEBUG("Call posix PWRITE for fd %d\n", nvf->fd);
+		result = _nvp_fileops->PWRITE(CALL_PWRITE);
+		NVP_END_TIMING(pwrite_t, write_time);
+		write_size += result;
+		num_posix_write++;
+		posix_write_size += result;
+		return result;
+	}
+
+	result = _nvp_check_write_size_valid(count);
+	if (result <= 0)
+		return result;
+	
+	int cpuid = GET_CPUID();
+	NVP_LOCK_FD_RD(nvf, cpuid);
+	NVP_CHECK_NVF_VALID(nvf);
+	NVP_LOCK_NODE_RD(nvf, cpuid);
+	
+	ssize_t available_length = (nvf->node->length) - offset;
+
+	if(count > available_length) {
+		DEBUG("Promoting PWRITE lock to WRLOCK\n");
+		NVP_UNLOCK_NODE_RD(nvf, cpuid);
+		NVP_LOCK_NODE_WR(nvf);
+		
+		result = _nvp_do_pwrite(CALL_PWRITE, 1, cpuid);
+
+		NVP_UNLOCK_NODE_WR(nvf);
+	}
+	else {
+		result = _nvp_do_pwrite(CALL_PWRITE, 0, cpuid);
+		NVP_UNLOCK_NODE_RD(nvf, cpuid);
+	}
+
+	NVP_UNLOCK_FD_RD(nvf, cpuid);
+
+	NVP_END_TIMING(pwrite_t, write_time);
+	write_size += result;
+
+	return result;
+}
+
 
 RETT_SEEK _nvp_SEEK(INTF_SEEK)
 {
