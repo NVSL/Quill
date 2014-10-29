@@ -1257,6 +1257,42 @@ RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64)
 	return -1;
 }
 
+static ssize_t _nvp_check_read_size_valid(size_t count)
+{ 
+	if(count == 0)
+	{
+		DEBUG("Requested a read of 0 length.  No problem\n");
+		return 0;
+	}
+	else if(count < 0)
+	{
+		DEBUG("Requested read of negative bytes (%li)\n", count);
+		errno = EINVAL;
+		return -1;
+	}
+
+	return count;
+}
+
+static ssize_t _nvp_check_write_size_valid(size_t count)
+{
+	if(count == 0)
+	{
+		DEBUG("Requested a write of 0 bytes.  No problem\n");
+		return 0;
+	}
+
+	if(((signed long long int)count) < 0)
+	{
+		DEBUG("Requested a write of %li < 0 bytes.\n",
+			(signed long long int)count);
+		errno = EINVAL;
+		return -1;
+	}
+
+	return count;
+}
+
 /* ========================== POSIX API methods =========================== */
 
 RETT_OPEN _nvp_OPEN(INTF_OPEN)
@@ -1275,7 +1311,8 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	DEBUG("_nvp_OPEN(%s)\n", path);
 	num_open++;
 	
-	DEBUG("Attempting to _nvp_OPEN the file \"%s\" with the following flags (0x%X): ", path, oflag);
+	DEBUG("Attempting to _nvp_OPEN the file \"%s\" with the following "
+		"flags (0x%X): ", path, oflag);
 
 	if((oflag&O_RDWR)||((oflag&O_RDONLY)&&(oflag&O_WRONLY))) {
 		DEBUG_P("O_RDWR ");
@@ -1312,11 +1349,12 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	{
 		if(FLAGS_INCLUDE(oflag, O_CREAT))
 		{
-			DEBUG("File does not exist and is set to be created.\n");
+			DEBUG("File does not exist and set to be created.\n");
 		}
 		else
 		{
-			DEBUG("File does not exist and is not set to be created.  returning\n");
+			DEBUG("File does not exist and not set to be created. "
+				"Returning\n");
 			errno = ENOENT;
 			NVP_END_TIMING(open_t, open_time);
 			return -1;
@@ -1334,11 +1372,13 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 
 		if(S_ISREG(file_st.st_mode))
 		{
-			DEBUG("File at path %s is a regular file, all is well.\n", path);
+			DEBUG("File at path %s is a regular file, "
+				"all is well.\n", path);
 		}
 		else
 		{
-			DEBUG("File at path %s is NOT a regular file!  INCONCEIVABLE\n", path);
+			DEBUG("File at path %s is NOT a regular file! "
+				"INCONCEIVABLE\n", path);
 			assert(S_ISREG(file_st.st_mode));
 		}
 	}
@@ -1353,7 +1393,8 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	}
 	else
 	{
-		DEBUG("File exists before we open it.  Let's get the lock first.\n");
+		DEBUG("File exists before we open it. "
+			"Let's get the lock first.\n");
 
 		// Find or allocate a NVNode
 		node = nvp_get_node(path, &file_st);
@@ -1376,7 +1417,8 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 
 	if(result<0)
 	{
-		DEBUG("_nvp_OPEN->%s_OPEN failed: %s\n", _nvp_fileops->name, strerror(errno));
+		DEBUG("_nvp_OPEN->%s_OPEN failed: %s\n",
+			_nvp_fileops->name, strerror(errno));
 		NVP_END_TIMING(open_t, open_time);
 		return result;
 	}	
@@ -1386,16 +1428,19 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	struct NVFile* nvf = &_nvp_fd_lookup[result];
 	NVP_LOCK_FD_WR(nvf);
 
-	DEBUG("_nvp_OPEN succeeded for path %s: fd %i returned.  filling in file info\n", path, result);
+	DEBUG("_nvp_OPEN succeeded for path %s: fd %i returned. "
+		"filling in file info\n", path, result);
 
 	if(_nvp_fd_lookup[result].valid)
 	{
-		ERROR("There is already a file open with that FD (%i)!\n", result);
+		ERROR("There is already a file open with that FD (%i)!\n",
+			result);
 		assert(0);
 	}
 	else
 	{
-		DEBUG("There was not already an NVFile for fd %i (that's good)\n", result);
+		DEBUG("There was not already an NVFile for fd %i "
+			"(that's good)\n", result);
 	}
 
 	SANITYCHECK(!access(path, F_OK)); // file exists
@@ -1404,17 +1449,20 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 
 	if(stat(path, &file_st))
 	{
-		ERROR("Failed to stat opened file %s: %s\n", path, strerror(errno));
+		ERROR("Failed to stat opened file %s: %s\n",
+			path, strerror(errno));
 		assert(0);
 	}
 	else 
 	{
-		DEBUG("Stat successful for newly opened file %s (fd %i)\n", path, result);
+		DEBUG("Stat successful for newly opened file %s (fd %i)\n",
+			path, result);
 	}
 
 	if(node == NULL)
 	{
-		DEBUG("We created the file.  Let's check and make sure someone else hasn't already created the node.\n");
+		DEBUG("We created the file.  Let's check and make sure "
+			"someone else hasn't already created the node.\n");
 
 		// Find or allocate a NVNode
 		node = nvp_get_node(path, &file_st);
@@ -1425,13 +1473,18 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 	{
 		if(file_st.st_size != 0)
 		{
-			WARNING("O_TRUNC was set, but after %s->OPEN, file length was not 0!\n", _nvp_fileops->name);
-			WARNING("This is probably the result of another thread modifying the underlying node before we could get a lock on it.\n");
+			WARNING("O_TRUNC was set, but after %s->OPEN, "
+				"file length was not 0!\n", _nvp_fileops->name);
+			WARNING("This is probably the result of another "
+				"thread modifying the underlying node before "
+				"we could get a lock on it.\n");
 			//assert(0);
 		}
 		else
 		{
-			DEBUG("O_TRUNC was set, and after %s->OPEN file length was 0 (as it should be).\n", _nvp_fileops->name);
+			DEBUG("O_TRUNC was set, and after %s->OPEN file "
+				"length was 0 (as it should be).\n",
+				_nvp_fileops->name);
 		}
 	}
 
@@ -1452,12 +1505,8 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		nvf->canRead = 1;
 		nvf->canWrite = 1;
 	} else if(oflag&O_WRONLY) {
-		DEBUG("oflag (%i) specifies O_WRONLY for fd %i\n", oflag, result);
-		#if 0
-		oflag |= O_RDWR;
-		nvf->canRead = 1;
-		nvf->canWrite = 1;
-		#else
+		DEBUG("oflag (%i) specifies O_WRONLY for fd %i\n", oflag,
+			result);
 		MSG("File %s is opened O_WRONLY.\n", path);
 		MSG("Does not support mmap, use posix instead.\n");
 		nvf->posix = 1;
@@ -1467,9 +1516,9 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 		NVP_UNLOCK_FD_WR(nvf);
 		NVP_END_TIMING(open_t, open_time);
 		return nvf->fd;
-		#endif
 	} else if(FLAGS_INCLUDE(oflag, O_RDONLY)) {
-		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n", oflag, result);
+		DEBUG("oflag (%i) specifies O_RDONLY for fd %i\n",
+			oflag, result);
 		nvf->canRead = 1;
 		nvf->canWrite = 0;
 	} else {
@@ -1490,7 +1539,9 @@ RETT_OPEN _nvp_OPEN(INTF_OPEN)
 
 	if(FLAGS_INCLUDE(oflag, O_TRUNC) && nvf->node->length)
 	{
-		DEBUG("We just opened a file with O_TRUNC that was already open with nonzero length %li.  Updating length.\n", nvf->node->length);
+		DEBUG("We just opened a file with O_TRUNC that was already "
+			"open with nonzero length %li.  Updating length.\n",
+			nvf->node->length);
 		nvf->node->length = 0;
 	}
 /*
@@ -1577,7 +1628,6 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 	}
 
 	pthread_spin_lock(&node_lookup_lock);
-	//int iter;
 	nvf->node->reference--;
 	if (nvf->node->reference == 0)
 		nvf->node->serialno = 0;
@@ -1608,41 +1658,6 @@ RETT_CLOSE _nvp_CLOSE(INTF_CLOSE)
 	NVP_END_TIMING(close_t, close_time);
 
 	return result;
-}
-
-static ssize_t _nvp_check_read_size_valid(size_t count)
-{ 
-	if(count == 0)
-	{
-		DEBUG("Requested a read of 0 length.  No problem\n");
-		return 0;
-	}
-	else if(count < 0)
-	{
-		DEBUG("Requested read of negative bytes (%li)\n", count);
-		errno = EINVAL;
-		return -1;
-	}
-
-	return count;
-}
-
-static ssize_t _nvp_check_write_size_valid(size_t count)
-{
-	if(count == 0)
-	{
-		DEBUG("Requested a write of 0 bytes.  No problem\n");
-		return 0;
-	}
-
-	if(((signed long long int)count) < 0)
-	{
-		DEBUG("Requested a write of %li < 0 bytes.\n", (signed long long int)count);
-		errno = EINVAL;
-		return -1;
-	}
-
-	return count;
 }
 
 RETT_READ _nvp_READ(INTF_READ)
@@ -1681,14 +1696,17 @@ RETT_READ _nvp_READ(INTF_READ)
 	NVP_UNLOCK_NODE_RD(nvf, cpuid);
 	
 	if(result == length)	{
-		DEBUG("PREAD succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
+		DEBUG("PREAD succeeded: extending offset from %li to %li\n",
+			*nvf->offset - result, *nvf->offset);
 	}
 	else if (result <= 0){
-		DEBUG("_nvp_READ: PREAD failed; not changing offset. (returned %i)\n", result);
+		DEBUG("_nvp_READ: PREAD failed; not changing offset. "
+			"(returned %i)\n", result);
 		// assert(0); // TODO: this is for testing only
 		__sync_fetch_and_sub(nvf->offset, length);
 	} else {
-		DEBUG("_nvp_READ: PREAD failed; Not fully read. (returned %i)\n", result);
+		DEBUG("_nvp_READ: PREAD failed; Not fully read. "
+			"(returned %i)\n", result);
 		// assert(0); // TODO: this is for testing only
 		__sync_fetch_and_sub(nvf->offset, length - result);
 	}
@@ -1741,24 +1759,34 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 	{
 		if(nvf->append)
 		{
-			size_t temp_offset = __sync_fetch_and_add(nvf->offset, 0);
-			DEBUG("PWRITE succeeded and append == true.  Setting offset to end...\n"); 
-			assert(_nvp_do_seek64(nvf->fd, 0, SEEK_END) != (RETT_SEEK64)-1);
-			DEBUG("PWRITE: offset changed from %li to %li\n", temp_offset, *nvf->offset);
+			size_t temp_offset = __sync_fetch_and_add(nvf->offset,
+									0);
+			DEBUG("PWRITE succeeded and append == true. "
+				"Setting offset to end...\n"); 
+			assert(_nvp_do_seek64(nvf->fd, 0, SEEK_END)
+				!= (RETT_SEEK64)-1);
+			DEBUG("PWRITE: offset changed from %li to %li\n",
+				temp_offset, *nvf->offset);
 			temp_offset = 4; // touch temp_offset
 		}
 		else
 		{
-			DEBUG("PWRITE succeeded: extending offset from %li to %li\n", *nvf->offset - result, *nvf->offset);
+			DEBUG("PWRITE succeeded: extending offset "
+				"from %li to %li\n",
+				*nvf->offset - result, *nvf->offset);
 //			*nvf->offset += result;
 		}
 	}
 	else {
-		DEBUG("_nvp_WRITE: PWRITE failed; not changing offset. (returned %i)\n", result);
+		DEBUG("_nvp_WRITE: PWRITE failed; not changing offset. "
+			"(returned %i)\n", result);
 		// assert(0); // TODO: this is for testing only
 	}
 
-	DEBUG("About to return from _nvp_WRITE with ret val %i (errno %i).  file len: %li, file off: %li, map len: %li\n", result, errno, nvf->node->length, nvf->offset, nvf->node->maplength);
+	DEBUG("About to return from _nvp_WRITE with ret val %i (errno %i). "
+		"file len: %li, file off: %li, map len: %li\n",
+		result, errno, nvf->node->length, nvf->offset,
+		nvf->node->maplength);
 
 	DO_MSYNC(nvf);
 
@@ -1938,8 +1966,8 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 
 	if(length == nvf->node->length)
 	{
-		DEBUG("_nvp_TRUNC64: requested length was the same as old length (%li).\n",
-			nvf->node->length);
+		DEBUG("_nvp_TRUNC64: requested length was the same as old "
+			"length (%li).\n", nvf->node->length);
 		NVP_UNLOCK_NODE_WR(nvf);
 		NVP_UNLOCK_FD_RD(nvf, cpuid);
 		return 0;
@@ -1953,17 +1981,20 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 
 	if(result != 0)
 	{
-		ERROR("%s->TRUNC64 failed (returned %li, requested %li): %s\n", _nvp_fileops->name, result, length, strerror(errno));
+		ERROR("%s->TRUNC64 failed (returned %li, requested %li): %s\n",
+			_nvp_fileops->name, result, length, strerror(errno));
 		assert(0);
 	}
 
 	if(length > nvf->node->length)
 	{
-		MSG("TRUNC64 extended file from %li to %li\n", nvf->node->length, length);
+		MSG("TRUNC64 extended file from %li to %li\n",
+			nvf->node->length, length);
 	}
 	else 
 	{
-		MSG("TRUNC64 shortened file from %li to %li\n", nvf->node->length, length);
+		MSG("TRUNC64 shortened file from %li to %li\n",
+			nvf->node->length, length);
 	}
 
 	nvf->node->length = length;
@@ -2165,7 +2196,9 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 
 	if(result < 0)
 	{
-		DEBUG("_nvp_DUP2 failed to %s->DUP2(%i, %i) (returned %i): %s\n", _nvp_fileops->name, file, fd2, result, strerror(errno));
+		DEBUG("_nvp_DUP2 failed to %s->DUP2(%i, %i) "
+			"(returned %i): %s\n", _nvp_fileops->name, file,
+			fd2, result, strerror(errno));
 		NVP_UNLOCK_NODE_WR(nvf);
 		if(nvf->node != nvf2->node) { NVP_UNLOCK_NODE_WR(nvf2); }
 		NVP_UNLOCK_FD_WR(nvf);
@@ -2185,7 +2218,10 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 
 	if(result != fd2)
 	{
-		WARNING("result of _nvp_DUP2(%i, %i) didn't return the fd2 that was just closed.  Technically this doesn't violate POSIX, but I DON'T LIKE IT.  (Got %i, expected %i)\n",
+		WARNING("result of _nvp_DUP2(%i, %i) didn't return the fd2 "
+			"that was just closed.  Technically this doesn't "
+			"violate POSIX, but I DON'T LIKE IT. "
+			"(Got %i, expected %i)\n",
 			file, fd2, result, fd2);
 		assert(0);
 
@@ -2197,7 +2233,10 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 
 		if(nvf2->valid)
 		{
-			DEBUG("%s->DUP2 returned a result which corresponds to an already open NVFile! dup2(%i, %i) returned %i\n", _nvp_fileops->name, file, fd2, result);
+			DEBUG("%s->DUP2 returned a result which corresponds "
+				"to an already open NVFile! dup2(%i, %i) "
+				"returned %i\n", _nvp_fileops->name,
+				file, fd2, result);
 			assert(0);
 		}
 	}
@@ -2216,7 +2255,8 @@ RETT_DUP2 _nvp_DUP2(INTF_DUP2)
 	SANITYCHECK(nvf2->node != NULL);
 	SANITYCHECK(nvf2->valid);
 
-	DEBUG("fd2 should now match fd1.  Testing to make sure this is true.\n");
+	DEBUG("fd2 should now match fd1. "
+		"Testing to make sure this is true.\n");
 
 	NVP_CHECK_NVF_VALID_WR(nvf2);
 
