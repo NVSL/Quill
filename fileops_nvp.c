@@ -18,9 +18,6 @@
 
 BOOST_PP_SEQ_FOR_EACH(DECLARE_WITHOUT_ALIAS_FUNCTS_IWRAP, _nvp_, ALLOPS_WPAREN)
 
-RETT_OPEN _nvp_OPEN(INTF_OPEN);
-RETT_IOCTL _nvp_IOCTL(INTF_IOCTL);
-
 int MMAP_PAGE_SIZE;
 
 void* _nvp_zbuf; // holds all zeroes.  used for aligned file extending. TODO: does sharing this hurt performance?
@@ -32,13 +29,6 @@ struct NVNode* _nvp_node_lookup;
 int _nvp_ino_lookup[1024];
 
 void _nvp_init2(void);
-void _nvp_SIGBUS_handler(int sig);
-void _nvp_SIGUSR1_handler(int sig);
-void _nvp_test_invalidate_node(struct NVFile* nvf);
-
-RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid); // like PWRITE, but without locks (called by _nvp_WRITE)
-RETT_PWRITE _nvp_do_pread (INTF_PREAD, int wr_lock, int cpuid); // like PREAD , but without locks (called by _nvp_READ )
-RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64); // called by nvp_seek, nvp_seek64, nvp_write
 
 MODULE_REGISTRATION_F("nvp", _nvp_, _nvp_init2(); );
 
@@ -344,7 +334,7 @@ void nvp_print_time_stats(void)
 {
 	int i;
 
-	printf("=========================== NVP timing stats: ==========================\n");
+	printf("==================== NVP timing stats: ====================\n");
 	for (i = 0; i < TIMING_NUM; i++)
 		printf("%s: count %llu, timing %llu, average %llu\n",
 			Timingstring[i], Countstats[i], Timingstats[i],
@@ -362,7 +352,7 @@ void nvp_print_time_stats(void)
 {
 	int i;
 
-	printf("=========================== NVP timing stats: ==========================\n");
+	printf("==================== NVP timing stats: ====================\n");
 	for (i = 0; i < TIMING_NUM; i++)
 		printf("%s: count %llu\n", Timingstring[i], Countstats[i]);
 }
@@ -391,7 +381,7 @@ volatile size_t _nvp_wr_total;
 
 void nvp_print_io_stats(void)
 {
-	printf("=========================== NVP IO stats: ==========================\n");
+	printf("====================== NVP IO stats: ======================\n");
 	printf("open %u, close %u\n", num_open, num_close);
 	printf("READ: count %u, size %llu, average %llu\n", num_read,
 		read_size, num_read ? read_size / num_read : 0);
@@ -409,7 +399,8 @@ void nvp_print_io_stats(void)
 	printf("posix WRITE: count %u, size %llu, average %llu\n",
 		num_posix_write, posix_write_size,
 		num_posix_write ? posix_write_size / num_posix_write : 0);
-	printf("write extends %lu, total %lu\n", _nvp_wr_extended, _nvp_wr_total);
+	printf("write extends %lu, total %lu\n", _nvp_wr_extended,
+		_nvp_wr_total);
 }
 
 /* ========================== Internal methods =========================== */
@@ -447,19 +438,36 @@ void _nvp_SIGUSR1_handler(int sig)
 	nvp_print_io_stats();
 }
 
+void _nvp_SIGBUS_handler(int sig)
+{
+	ERROR("We got a SIGBUS (sig %i)! "
+		"This almost certainly means someone tried to access an area "
+		"inside an mmaped region but past the length of the mmapped "
+		"file.\n", sig);
+	assert(0);
+}
+
 void _nvp_init2(void)
 {
+	int i;
+
 	assert(!posix_memalign(((void**)&_nvp_zbuf), 4096, 4096));
 
-	_nvp_fd_lookup = (struct NVFile*) calloc(OPEN_MAX, sizeof(struct NVFile));
+	_nvp_fd_lookup = (struct NVFile*)calloc(OPEN_MAX,
+						sizeof(struct NVFile));
+	if (!_nvp_fd_lookup)
+		assert(0);
 
-	int i;
 	for(i = 0; i < OPEN_MAX; i++) {
 		_nvp_fd_lookup[i].valid = 0;
 		NVP_LOCK_INIT(_nvp_fd_lookup[i].lock);
 	}
 
-	_nvp_node_lookup = (struct NVNode*) calloc(OPEN_MAX, sizeof(struct NVNode));
+	_nvp_node_lookup = (struct NVNode*)calloc(OPEN_MAX,
+						sizeof(struct NVNode));
+	if (!_nvp_node_lookup)
+		assert(0);
+
 	memset(_nvp_node_lookup, 0, OPEN_MAX * sizeof(struct NVNode));
 
 	for(i = 0; i < OPEN_MAX; i++) {
@@ -545,7 +553,7 @@ struct NVNode * nvp_allocate_node(void)
 
 	for (i = 0; i < OPEN_MAX; i++) {
 		if (_nvp_node_lookup[i].serialno == 0) {
-			DEBUG("Allocate1 node %d\n", i);
+			DEBUG("Allocate unused node %d\n", i);
 			node = &_nvp_node_lookup[i];
 			break;
 		}
@@ -561,7 +569,7 @@ struct NVNode * nvp_allocate_node(void)
 
 	if (candidate != -1) {
 		node = &_nvp_node_lookup[candidate];
-		DEBUG("Allocate2 node %d\n", candidate);
+		DEBUG("Allocate unreferenced node %d\n", candidate);
 		NVP_END_TIMING(alloc_node_t, alloc_node_time);
 		return node;
 	}
@@ -583,8 +591,12 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 	index = file_st->st_ino % 1024;
 	if (_nvp_ino_lookup[index]) {
 		i = _nvp_ino_lookup[index];
-		if ( _nvp_fd_lookup[i].node && _nvp_fd_lookup[i].node->serialno == file_st->st_ino) {
-			DEBUG("File %s is (or was) already open in fd %i (this fd hasn't been __open'ed yet)!  Sharing nodes.\n", path, i);
+		if ( _nvp_fd_lookup[i].node &&
+				_nvp_fd_lookup[i].node->serialno ==
+					file_st->st_ino) {
+			DEBUG("File %s is (or was) already open in fd %i "
+				"(this fd hasn't been __open'ed yet)! "
+				"Sharing nodes.\n", path, i);
 			node = _nvp_fd_lookup[i].node;
 			SANITYCHECK(node != NULL);
 			node->reference++;
@@ -594,7 +606,8 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 	}
 
 	if(node == NULL) {
-		DEBUG("File %s is not already open.  Allocating new NVNode.\n", path);
+		DEBUG("File %s is not already open. "
+			"Allocating new NVNode.\n", path);
 		node = nvp_allocate_node();
 		assert(node);
 		node->serialno = file_st->st_ino;
@@ -776,7 +789,8 @@ not_found:
 			if (root[index] == 0) {
 				root[index] = (unsigned long)malloc(1024 *
 						sizeof(unsigned long));
-				DEBUG("Malloc new leaf @%p, height %u, index %u\n",
+				DEBUG("Malloc new leaf @%p, height %u, "
+					"index %u\n",
 					root[index], height, index);
 				root = (unsigned long *)root[index];
 				for (i = 0; i < 1024; i++)
@@ -820,13 +834,13 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 
 	ssize_t available_length = (nvf->node->length) - offset;
 
-	if(UNLIKELY(!nvf->canRead)) {
+	if (UNLIKELY(!nvf->canRead)) {
 		DEBUG("FD not open for reading: %i\n", file);
 		errno = EBADF;
 		return -1;
 	}
 
-	else if(UNLIKELY(offset < 0))
+	else if (UNLIKELY(offset < 0))
 	{
 		DEBUG("Requested read at negative offset (%li)\n", offset);
 		errno = EINVAL;
@@ -839,53 +853,50 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 
 		if(UNLIKELY(available_length <= 0))
 		{
-			DEBUG("Actually there weren't any bytes available to read.  Bye! (length %li, offset %li, available_length %li)\n", nvf->node->length, offset, available_length);
+			DEBUG("Actually there weren't any bytes available "
+				"to read.  Bye! (length %li, offset %li, "
+				"available_length %li)\n", nvf->node->length,
+				offset, available_length);
 			return 0;
 		}
 
 		if(UNLIKELY(count % 512))
 		{
-			DEBUG("cout is not aligned to 512 (count was %i)\n", count);
+			DEBUG("cout is not aligned to 512 (count was %i)\n",
+				count);
 			errno = EINVAL;
 			return -1;
 		}
 		if(UNLIKELY(offset % 512))
 		{
-			DEBUG("offset was not aligned to 512 (offset was %i)\n", offset);
+			DEBUG("offset was not aligned to 512 (offset was %i)\n",
+				offset);
 			errno = EINVAL;
 			return -1;
 		}
-	//	if((long long int)buf % 512)
 		if(UNLIKELY(((long long int)buf & (512-1)) != 0))
 		{
-			DEBUG("buffer was not aligned to 512 (buffer was %p, mod 512=%i)\n", buf, (long long int)buf % 512);
+			DEBUG("buffer was not aligned to 512 (buffer was %p, "
+				"mod 512=%i)\n", buf, (long long int)buf % 512);
 			errno = EINVAL;
 			return -1;
 		}
-	}
-
-	int intersects = 0;
-
-	if(UNLIKELY( buf == (void*)nvf->node->data )) { intersects = 1; }
-	if(UNLIKELY( (buf > (void*)nvf->node->data) && (buf <= (void*)nvf->node->data + nvf->node->maplength) )) { intersects = 1; }
-	if(UNLIKELY( (buf < (void*)nvf->node->data) && (buf+count >= (void*)nvf->node->data) )) { intersects = 1; }
-
-	if(UNLIKELY(intersects))
-	{
-		DEBUG("Buffer intersects with map (buffer %p map %p)\n", buf, nvf->node->data);
-		assert(0);
-		NVP_END_TIMING(do_pread_t, do_pread_time);
-		return -1;
 	}
 
 	ssize_t len_to_read = count;
 
-	DEBUG("time for a Pread.  file length %li, offset %li, length-offset %li, count %li, count>offset %s\n", nvf->node->length, offset, available_length, count, (count>available_length)?"true":"false");
+	DEBUG("time for a Pread.  file length %li, offset %li, "
+		"length-offset %li, count %li, count>offset %s\n",
+		nvf->node->length, offset, available_length, count,
+		(count>available_length) ? "true" : "false");
 
-	if(count > available_length )
+	if (count > available_length)
 	{
 		len_to_read = available_length;
-		DEBUG("Request read length was %li, but only %li bytes available. (filelen=%li, offset=%li, requested %li)\n", count, len_to_read, nvf->node->length, offset, count);
+		DEBUG("Request read length was %li, but only %li bytes "
+			"available. (filelen = %li, offset = %li, "
+			"requested %li)\n", count, len_to_read,
+			nvf->node->length, offset, count);
 	}
 
 	if(UNLIKELY( (len_to_read <= 0) || (available_length <= 0) ))
@@ -894,9 +905,8 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 		return 0; // reading 0 bytes is easy!
 	}
 
-	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p, %p (%p+%li), %li (call was %li))\n", buf, nvf->node->data+offset, nvf->node->data, offset, len_to_read, count);
-
-	DEBUG("mmap is length %li, len_to_read is %li\n", nvf->node->maplength, len_to_read);
+	DEBUG("mmap is length %li, len_to_read is %li\n", nvf->node->maplength,
+		len_to_read);
 
 	SANITYCHECK(len_to_read + offset <= nvf->node->length);
 //	SANITYCHECK(nvf->node->length < nvf->node->maplength);
@@ -907,7 +917,8 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 	while (len_to_read > 0) {
 		NVP_START_TIMING(get_mmap_t, get_mmap_time);
 		ret = nvp_get_mmap_address(nvf, read_offset, read_count,
-					&mmap_addr, &extent_length, wr_lock, cpuid);
+					&mmap_addr, &extent_length, wr_lock,
+					cpuid);
 		NVP_END_TIMING(get_mmap_t, get_mmap_time);
 
 		DEBUG("Pread: get_mmap_address returned %d, length %llu\n",
@@ -932,20 +943,12 @@ RETT_PREAD _nvp_do_pread(INTF_PREAD, int wr_lock, int cpuid)
 		if (extent_length > len_to_read)
 			extent_length = len_to_read;
 
-		#if NOSANITYCHECK
-		#else
-		void* result =
-		#endif
-//			FSYNC_MEMCPY(buf, nvf->node->data+offset, len_to_read);
-			NVP_START_TIMING(memcpyr_t, memcpyr_time);
-			memcpy1(buf, (char *)mmap_addr, extent_length);
-			NVP_END_TIMING(memcpyr_t, memcpyr_time);
+		NVP_START_TIMING(memcpyr_t, memcpyr_time);
+		memcpy1(buf, (char *)mmap_addr, extent_length);
+		NVP_END_TIMING(memcpyr_t, memcpyr_time);
 
 		num_memcpy_read++;
 		memcpy_read_size += extent_length;
-
-		SANITYCHECK(result == buf);
-		SANITYCHECK(result > 0);
 
 		len_to_read -= extent_length;
 		read_offset += extent_length;
@@ -989,41 +992,35 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 		DEBUG("This write must be aligned.  Checking alignment.\n");
 		if(UNLIKELY(count % 512))
 		{
-			DEBUG("count is not aligned to 512 (count was %li)\n", count);
+			DEBUG("count is not aligned to 512 (count was %li)\n",
+				count);
 			errno = EINVAL;
 			return -1;
 		}
 		if(UNLIKELY(offset % 512))
 		{
-			DEBUG("offset was not aligned to 512 (offset was %li)\n", offset);
+			DEBUG("offset was not aligned to 512 "
+				"(offset was %li)\n", offset);
 			errno = EINVAL;
 			return -1;
 		}
 	//	if((long long int)buf % 512)
 		if(UNLIKELY(((long long int)buf & (512-1)) != 0))
 		{
-			DEBUG("buffer was not aligned to 512 (buffer was %p, mod 512 = %li)\n", buf, (long long int)buf % 512);
+			DEBUG("buffer was not aligned to 512 (buffer was %p, "
+				"mod 512 = %li)\n", buf,
+				(long long int)buf % 512);
 			errno = EINVAL;
 			return -1;
 		}
 	}
 
-	int intersects = 0;
-
-	if( buf == (void*)nvf->node->data ) { intersects = 1; }
-	if( (buf > (void*)nvf->node->data) && (buf <= (void*)nvf->node->data + nvf->node->maplength) ) { intersects = 1; }
-	if( (buf < (void*)nvf->node->data) && (buf+count >= (void*)nvf->node->data) ) { intersects = 1; }
-
-	if(UNLIKELY(intersects))
-	{
-		DEBUG("Buffer intersects with map (buffer %p len %p, map %p to %p)\n", buf, count, nvf->node->data, nvf->node->data-nvf->node->maplength);
-		assert(0);
-		return -1;
-	}
-	
 	if(nvf->append)
 	{
-		DEBUG("this fd (%i) is O_APPEND; setting offset from the passed value (%li) to the end of the file (%li) prior to writing anything\n", nvf->fd, offset, nvf->node->length);
+		DEBUG("this fd (%i) is O_APPEND; setting offset from the "
+			"passed value (%li) to the end of the file (%li) "
+			"prior to writing anything\n", nvf->fd, offset,
+			nvf->node->length);
 		offset = nvf->node->length;
 	}
 
@@ -1035,29 +1032,19 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	{
 		_nvp_wr_extended++;
 
-		DEBUG("Request write length %li will extend file. (filelen=%li, offset=%li, count=%li, extension=%li)\n",
+		DEBUG("Request write length %li will extend file. "
+			"(filelen=%li, offset=%li, count=%li, extension=%li)\n",
 			count, nvf->node->length, offset, count, extension);
 		
 		ssize_t temp_result;
 		if(nvf->aligned) {
-			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n", _nvp_fileops->name, nvf->fd, _nvp_zbuf, 512, count+offset-512);
-//			temp_result = _nvp_fileops->PWRITE(nvf->fd, _nvp_zbuf, 512, count + offset - 512);
+			DEBUG_P("(aligned): %s->PWRITE(%i, %p, %li, %li)\n",
+				_nvp_fileops->name, nvf->fd, _nvp_zbuf, 512,
+				count+offset-512);
 		} else {
 			DEBUG_P("(unaligned)\n");
-//			temp_result = _nvp_fileops->PWRITE(nvf->fd, "\0", 1, count + offset - 1);
 		}	
 
-#if 0
-		if(temp_result != ((nvf->aligned)?512:1))
-		{
-			ERROR("Failed to use posix->pwrite to extend the file to the required length: returned %li, expected %li: %s\n", temp_result, ((nvf->aligned)?512:1), strerror(errno));
-			if(nvf->aligned) {
-				ERROR("Perhaps it's because this write needed to be aligned?\n");
-			}
-			PRINT_ERROR_NAME(errno);
-			assert(0);
-		}
-#endif
 		temp_result = _nvp_fileops->PWRITE(nvf->fd, buf, count, offset);
 		num_posix_write++;
 		posix_write_size += temp_result;
@@ -1068,7 +1055,9 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 //			DEBUG("Request will also extend map.\n");
 //			_nvp_extend_map(file, offset+count );
 		} else {
-			DEBUG("However, map is already large enough: %li > %li\n", nvf->node->maplength, offset+count);
+			DEBUG("However, map is already large enough: "
+				"%li > %li\n", nvf->node->maplength,
+				offset + count);
 			SANITYCHECK(nvf->node->maplength > (offset+count));
 		}
 
@@ -1077,27 +1066,30 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	}
 	else
 	{
-		DEBUG("File will NOT be extended: count + offset < length (%li < %li)\n", count+offset, nvf->node->length);
+		DEBUG("File will NOT be extended: count + offset < length "
+			"(%li < %li)\n", count+offset, nvf->node->length);
 	}
 
-	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p (%p+%li), %p, %li)\n", nvf->node->data+offset, nvf->node->data, offset, buf, count);
+	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p (%p+%li), %p, %li)\n",
+		nvf->node->data+offset, nvf->node->data, offset, buf, count);
 	
 	if(extension > 0)
 	{
-		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, (nvf->node->length+extension));
-		SANITYCHECK( (nvf->node->length+extension) < nvf->node->maplength);
+		DEBUG("maplen = %li > filelen after write (%li)\n",
+			nvf->node->maplength, (nvf->node->length+extension));
+		SANITYCHECK((nvf->node->length+extension)
+				< nvf->node->maplength);
 	}
 	else
 	{
-		DEBUG("maplen = %li > filelen after write (%li)\n", nvf->node->maplength, nvf->node->length);
-		SANITYCHECK( (nvf->node->length) < nvf->node->maplength);
+		DEBUG("maplen = %li > filelen after write (%li)\n",
+			nvf->node->maplength, nvf->node->length);
+		SANITYCHECK((nvf->node->length) < nvf->node->maplength);
 	}
 
 	SANITYCHECK(nvf->valid);
 	SANITYCHECK(nvf->node != NULL);
-	SANITYCHECK(nvf->node->data != NULL);
 	SANITYCHECK(nvf->node->maplength > nvf->node->length + ((extension>0)?extension:0));
-	SANITYCHECK(nvf->node->data+offset > 0);
 	SANITYCHECK(buf > 0);
 	SANITYCHECK(count >= 0);
 
@@ -1109,7 +1101,7 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 	while (len_to_write > 0) {
 		NVP_START_TIMING(get_mmap_t, get_mmap_time);
 		ret = nvp_get_mmap_address(nvf, write_offset, write_count,
-					&mmap_addr, &extent_length, wr_lock, cpuid);
+				&mmap_addr, &extent_length, wr_lock, cpuid);
 		NVP_END_TIMING(get_mmap_t, get_mmap_time);
 
 		DEBUG("Pwrite: get_mmap_address returned %d, length %llu\n",
@@ -1149,13 +1141,120 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 
 	//nvf->offset += count; // NOT IN PWRITE (this happens in write)
 
-	DEBUG("About to return from _nvp_PWRITE with ret val %li.  file len: %li, file off: %li, map len: %li, node %p\n", count, nvf->node->length, nvf->offset, nvf->node->maplength, nvf->node);
+	DEBUG("About to return from _nvp_PWRITE with ret val %li.  file len: "
+		"%li, file off: %li, map len: %li, node %p\n",
+		count, nvf->node->length, nvf->offset,
+		nvf->node->maplength, nvf->node);
 
 	DO_MSYNC(nvf);
 
 out:
 	NVP_END_TIMING(do_pwrite_t, do_pwrite_time);
 	return write_count;
+}
+
+void _nvp_test_invalidate_node(struct NVFile* nvf)
+{
+	struct NVNode* node = nvf->node;
+
+	DEBUG("munmapping temporarily diabled...\n"); // TODO
+
+	return;
+
+	SANITYCHECK(node!=NULL);
+
+	int do_munmap = 1;
+
+	int i;
+	for(i = 0; i < OPEN_MAX; i++)
+	{
+		if ((_nvp_fd_lookup[i].valid) && (node==_nvp_fd_lookup[i].node))
+		{
+			do_munmap = 0;
+			break;
+		}
+	}
+
+	if(do_munmap)
+	{
+		DEBUG("Node appears not to be in use anymore.  munmapping.\n");
+
+		if(munmap(node->data, node->maplength))
+		{
+			ERROR("Coudln't munmap file! %s\n", strerror(errno));
+			assert(0);
+		}
+		
+//		pthread_rwlock_destroy(&node->lock);
+
+		free(node);
+
+		nvf->node = NULL; // we don't want anyone using this again
+		
+		DEBUG("munmap successful.\n");
+	}
+	else
+	{
+		DEBUG("Node appears to still be in use.  Not munmapping.\n");
+	}
+}
+
+RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64)
+{
+	CHECK_RESOLVE_FILEOPS(_nvp_);
+
+	DEBUG("_nvp_do_seek64\n");
+
+	struct NVFile* nvf = &_nvp_fd_lookup[file];
+	
+	DEBUG("_nvp_do_seek64: file len %li, map len %li, current offset %li, "
+		"requested offset %li with whence %li\n", 
+		nvf->node->length, nvf->node->maplength, *nvf->offset,
+		offset, whence);
+
+	switch(whence)
+	{
+		case SEEK_SET:
+			if(offset < 0)
+			{
+				DEBUG("offset out of range (would result in "
+					"negative offset).\n");
+				errno = EINVAL;
+				return -1;
+			}
+			*(nvf->offset) = offset ;
+			return *(nvf->offset);
+
+		case SEEK_CUR:
+			if((*(nvf->offset) + offset) < 0)
+			{
+				DEBUG("offset out of range (would result in "
+					"negative offset).\n");
+				errno = EINVAL;
+				return -1;
+			}
+			*(nvf->offset) += offset ;
+			return *(nvf->offset);
+
+		case SEEK_END:
+			if( nvf->node->length + offset < 0 )
+			{
+				DEBUG("offset out of range (would result in "
+					"negative offset).\n");
+				errno = EINVAL;
+				return -1;
+			}
+			*(nvf->offset) = nvf->node->length + offset;
+			return *(nvf->offset);
+
+		default:
+			DEBUG("Invalid whence parameter.\n");
+			errno = EINVAL;
+			return -1;
+	}
+
+	assert(0); // unreachable
+	return -1;
 }
 
 /* ========================== POSIX API methods =========================== */
@@ -1801,59 +1900,6 @@ RETT_SEEK64 _nvp_SEEK64(INTF_SEEK64)
 	return result;
 }
 
-RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64)
-{
-	CHECK_RESOLVE_FILEOPS(_nvp_);
-
-	DEBUG("_nvp_do_seek64\n");
-
-	struct NVFile* nvf = &_nvp_fd_lookup[file];
-	
-	DEBUG("_nvp_do_seek64: file len %li, map len %li, current offset %li, requested offset %li with whence %li\n", 
-		nvf->node->length, nvf->node->maplength, *nvf->offset, offset, whence);
-
-	switch(whence)
-	{
-		case SEEK_SET:
-			if(offset < 0)
-			{
-				DEBUG("offset out of range (would result in negative offset).\n");
-				errno = EINVAL;
-				return -1;
-			}
-			*(nvf->offset) = offset ;
-			return *(nvf->offset);
-
-		case SEEK_CUR:
-			if((*(nvf->offset) + offset) < 0)
-			{
-				DEBUG("offset out of range (would result in negative offset).\n");
-				errno = EINVAL;
-				return -1;
-			}
-			*(nvf->offset) += offset ;
-			return *(nvf->offset);
-
-		case SEEK_END:
-			if( nvf->node->length + offset < 0 )
-			{
-				DEBUG("offset out of range (would result in negative offset).\n");
-				errno = EINVAL;
-				return -1;
-			}
-			*(nvf->offset) = nvf->node->length + offset;
-			return *(nvf->offset);
-
-		default:
-			DEBUG("Invalid whence parameter.\n");
-			errno = EINVAL;
-			return -1;
-	}
-
-	assert(0); // unreachable
-	return -1;
-}
-
 RETT_TRUNC _nvp_TRUNC(INTF_TRUNC)
 {
 	CHECK_RESOLVE_FILEOPS(_nvp_);
@@ -2249,58 +2295,5 @@ RETT_FDSYNC _nvp_FDSYNC(INTF_FDSYNC)
 	NVP_END_TIMING(fdsync_t, fdsync_time);
 
 	return result;
-}
-
-void _nvp_test_invalidate_node(struct NVFile* nvf)
-{
-	struct NVNode* node = nvf->node;
-
-	DEBUG("munmapping temporarily diabled...\n"); // TODO
-
-	return;
-
-	SANITYCHECK(node!=NULL);
-
-	int do_munmap = 1;
-
-	int i;
-	for(i=0; i<OPEN_MAX; i++)
-	{
-		if( (_nvp_fd_lookup[i].valid) && (node==_nvp_fd_lookup[i].node) )
-		{
-			do_munmap = 0;
-			break;
-		}
-	}
-
-	if(do_munmap)
-	{
-		DEBUG("Node appears not to be in use anymore.  munmapping.\n");
-
-		if(munmap(node->data, node->maplength))
-		{
-			ERROR("Coudln't munmap file! %s\n", strerror(errno));
-			assert(0);
-		}
-		
-//		pthread_rwlock_destroy(&node->lock);
-
-		free(node);
-
-		nvf->node = NULL; // we don't want anyone using this again
-		
-		DEBUG("munmap successful.\n");
-	}
-	else
-	{
-		DEBUG("Node appears to still be in use.  Not munmapping.\n");
-	}
-}
-
-void _nvp_SIGBUS_handler(int sig)
-{
-	ERROR("We got a SIGBUS (sig %i)!  This almost certainly means someone tried to access an area inside an mmaped region but past the length of the mmapped file.\n", sig);
-//	_nvp_debug_handoff();
-	assert(0);
 }
 
