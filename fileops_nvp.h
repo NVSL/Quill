@@ -28,7 +28,7 @@ struct NVNode
 {
 	ino_t serialno;
 	NVP_LOCK_DECL;
-	char* volatile data; // the pointer itself is volatile
+//	char* volatile data; // the pointer itself is volatile
 	volatile size_t length;
 	volatile size_t maplength;
 	unsigned long *root;

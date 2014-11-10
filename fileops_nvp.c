@@ -221,10 +221,44 @@ static char* memcpy1(char *to, char *from, size_t n)
 
 /* ============================= Fsync =============================== */
 
+static unsigned long calculate_capacity(unsigned int height);
+
+/* FIXME: untested */
 static inline void fsync_flush_on_fsync(struct NVFile* nvf)
 {
+	unsigned int height = nvf->node->height;
+	unsigned long capacity = MAX_MMAP_SIZE;
+	unsigned long *root = nvf->node->root;
+	unsigned long start_addr;
+	off_t start_offset = 0, curr_offset;
+	int index;
+
+	capacity = calculate_capacity(height);
+
 	_mm_mfence();
-	do_cflush_len(nvf->node->data, nvf->node->length);
+//	do_cflush_len(nvf->node->data, nvf->node->length);
+	while (1) {
+		height = nvf->node->height;
+		curr_offset = start_offset;
+		do {
+			index = curr_offset / capacity;
+			DEBUG("index %d\n", index);
+			if (index >= 1024 || root[index] == 0) {
+				return;
+			}
+			if (height) {
+				root = (unsigned long *)root[index];
+				DEBUG("%p\n", root);
+			} else {
+				start_addr = root[index];
+				do_cflush_len((void *)start_addr,
+							MAX_MMAP_SIZE);
+				DEBUG("addr 0x%lx\n", start_addr);
+			}
+			curr_offset = curr_offset % capacity;
+		} while(height--);
+		start_offset += MAX_MMAP_SIZE;
+	}
 	_mm_mfence();
 }
 
@@ -611,7 +645,6 @@ struct NVNode * nvp_get_node(const char *path, struct stat *file_st)
 		node = nvp_allocate_node();
 		assert(node);
 		node->serialno = file_st->st_ino;
-		node->data = NULL;
 		node->reference++;
 	}
 
@@ -1070,9 +1103,6 @@ RETT_PWRITE _nvp_do_pwrite(INTF_PWRITE, int wr_lock, int cpuid)
 			"(%li < %li)\n", count+offset, nvf->node->length);
 	}
 
-	DEBUG("Preforming "MK_STR(FSYNC_MEMCPY)"(%p (%p+%li), %p, %li)\n",
-		nvf->node->data+offset, nvf->node->data, offset, buf, count);
-	
 	if(extension > 0)
 	{
 		DEBUG("maplen = %li > filelen after write (%li)\n",
@@ -1163,40 +1193,20 @@ void _nvp_test_invalidate_node(struct NVFile* nvf)
 
 	SANITYCHECK(node!=NULL);
 
-	int do_munmap = 1;
-
-	int i;
-	for(i = 0; i < OPEN_MAX; i++)
-	{
-		if ((_nvp_fd_lookup[i].valid) && (node==_nvp_fd_lookup[i].node))
-		{
-			do_munmap = 0;
-			break;
-		}
+	pthread_spin_lock(&node_lookup_lock);
+	node->reference--;
+	if (node->reference == 0) {
+		NVP_LOCK_NODE_WR(nvf);
+		int index = nvf->serialno % 1024;
+		_nvp_ino_lookup[index] = 0;
+		DEBUG("Close Cleanup node for %d\n", file);
+		// FIXME: Also munmap?
+		nvp_cleanup_node(nvf->node, 0);
+		node->serialno = 0;
+		NVP_UNLOCK_NODE_WR(nvf);
 	}
+	pthread_spin_unlock(&node_lookup_lock);
 
-	if(do_munmap)
-	{
-		DEBUG("Node appears not to be in use anymore.  munmapping.\n");
-
-		if(munmap(node->data, node->maplength))
-		{
-			ERROR("Coudln't munmap file! %s\n", strerror(errno));
-			assert(0);
-		}
-		
-//		pthread_rwlock_destroy(&node->lock);
-
-		free(node);
-
-		nvf->node = NULL; // we don't want anyone using this again
-		
-		DEBUG("munmap successful.\n");
-	}
-	else
-	{
-		DEBUG("Node appears to still be in use.  Not munmapping.\n");
-	}
 }
 
 RETT_SEEK64 _nvp_do_seek64(INTF_SEEK64)
@@ -1974,8 +1984,6 @@ RETT_TRUNC64 _nvp_TRUNC64(INTF_TRUNC64)
 	}
 
 	DO_MSYNC(nvf);
-
-//	assert(!munmap(nvf->node->data, nvf->node->maplength));
 
 	int result = _nvp_fileops->TRUNC64(CALL_TRUNC64);
 
