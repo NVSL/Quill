@@ -92,8 +92,13 @@ Boost is required to compile.
 				Usage
 ===============================================================================
 
-You just need to specify where Quill is and which module you want to use, by
-specifying the tree name.
+Using libnvm is simple. You can use the run_nvp script to run the nvp module.
+you might need to fix the path in the script though.
+
+	./run_nvp ./a.out
+
+For a more general way, you just need to specify where Quill is and which
+module you want to use, by specifying the tree name.
 
 	gcc mytest.c -o mytest
 	export LD_LIBRARY_PATH=$(MY_LD_LIB_PATH); export LD_PRELOAD="libnvp.so"; export NVP_TREE_FILE=$(TREE_NAME); ./mytest
