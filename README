@@ -55,8 +55,11 @@ checking" can be enabled by a preprocessor directive.
 nvp		1 target
 This module is a replacement for the standard POSIX file operations using
 memory-mapped commands to bypass the OS whenever possible.  When it isn't
-possible, it calls its target module.  This module is definitely not finished
-yet.
+possible, it calls its target module.  This module is not finished yet.
+
+bankshot2	1 target
+This module is the library part of bankshot2, a project that uses NVMM as
+a cache for disks, It needs to co-work with bankshot2 kernel module.
 
 moneta		1 target
 This module adapts standard POSIX operations to talk to Moneta.
