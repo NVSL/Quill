@@ -24,8 +24,7 @@ int _print_file_stats(int fd)
 {
 	char* path = _fd_path_lookup[fd];
 
-	int result = -1337;
-
+	int result;
 
 	struct stat file_st;
 	if(stat(path, &file_st))
@@ -38,7 +37,7 @@ int _print_file_stats(int fd)
 		result = _hub_find_fileop("posix")->SEEK(fd, 0, SEEK_CUR);
 		DEBUG("pos in file %s: %i\n", path, result);
 		DEBUG("file len %i\n", file_st.st_size);
-
+		(void)result;
 //		if(once && file_st.st_size == 105766836) { _nvp_debug_handoff(); once = 0;}
 	}
 //	return result;

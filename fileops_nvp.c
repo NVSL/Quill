@@ -1199,7 +1199,6 @@ void _nvp_test_invalidate_node(struct NVFile* nvf)
 		NVP_LOCK_NODE_WR(nvf);
 		int index = nvf->serialno % 1024;
 		_nvp_ino_lookup[index] = 0;
-		DEBUG("Close Cleanup node for %d\n", file);
 		// FIXME: Also munmap?
 		nvp_cleanup_node(nvf->node, 0);
 		node->serialno = 0;
