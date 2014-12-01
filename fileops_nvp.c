@@ -377,7 +377,7 @@ void nvp_print_time_stats(void)
 
 #else
 
-#define NVP_START_TIMING(name, start) {}
+#define NVP_START_TIMING(name, start) {(void)(start);}
 
 #define  NVP_END_TIMING(name, start) \
 	{Countstats[name]++;}
@@ -1769,15 +1769,15 @@ RETT_WRITE _nvp_WRITE(INTF_WRITE)
 	{
 		if(nvf->append)
 		{
-			size_t temp_offset = __sync_fetch_and_add(nvf->offset,
-									0);
+//			size_t temp_offset = __sync_fetch_and_add(nvf->offset,
+//									0);
 			DEBUG("PWRITE succeeded and append == true. "
 				"Setting offset to end...\n"); 
 			assert(_nvp_do_seek64(nvf->fd, 0, SEEK_END)
 				!= (RETT_SEEK64)-1);
-			DEBUG("PWRITE: offset changed from %li to %li\n",
-				temp_offset, *nvf->offset);
-			temp_offset = 4; // touch temp_offset
+//			DEBUG("PWRITE: offset changed from %li to %li\n",
+//				temp_offset, *nvf->offset);
+//			temp_offset = 4; // touch temp_offset
 		}
 		else
 		{

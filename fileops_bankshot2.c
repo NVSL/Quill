@@ -459,7 +459,7 @@ void bankshot2_print_time_stats(void)
 
 #else
 
-#define BANKSHOT2_START_TIMING(name, start) {}
+#define BANKSHOT2_START_TIMING(name, start) {(void)(start);}
 
 #define BANKSHOT2_END_TIMING(name, start) \
 	{Countstats[name]++;}
@@ -1457,11 +1457,11 @@ RETT_WRITE _bankshot2_WRITE(INTF_WRITE)
 	{
 		if(nvf->append)
 		{
-			size_t temp_offset = __sync_fetch_and_add(nvf->offset, 0);
+//			size_t temp_offset = __sync_fetch_and_add(nvf->offset, 0);
 			DEBUG("PWRITE succeeded and append == true.  Setting offset to end...\n"); 
 			assert(_bankshot2_do_seek64(nvf->fd, 0, SEEK_END) != (RETT_SEEK64)-1);
-			DEBUG("PWRITE: offset changed from %li to %li\n", temp_offset, *nvf->offset);
-			temp_offset = 4; // touch temp_offset
+//			DEBUG("PWRITE: offset changed from %li to %li\n", temp_offset, *nvf->offset);
+//			temp_offset = 4; // touch temp_offset
 		}
 		else
 		{
@@ -3120,6 +3120,7 @@ RETT_FDSYNC _bankshot2_FDSYNC(INTF_FDSYNC)
 
 #define TIME_EXTEND 0
 
+#if 0
 static int _bankshot2_get_fd_with_max_perms(struct NVFile *nvf, int file, int *max_perms)
 {
 	int fd_with_max_perms = file; // may not be marked as valid
@@ -3160,7 +3161,6 @@ static int _bankshot2_get_fd_with_max_perms(struct NVFile *nvf, int file, int *m
 	return fd_with_max_perms;
 }
 
-#if 0
 int _bankshot2_extend_map(struct NVFile *nvf, size_t newcharlen)
 {
 	int file = nvf->fd;

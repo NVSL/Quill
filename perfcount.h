@@ -80,7 +80,7 @@ static inline struct vm_timing_stat perf_condense_stat(stat_per_cpu s) {
 // static inline void perf_increment_count(stat_per_cpu s) {
 #define perf_increment_count(s) s[get_cpuid()].count++
 
-static void perf_print_stat(FILE* fd, stat_per_cpu s, const char* name)
+static inline void perf_print_stat(FILE* fd, stat_per_cpu s, const char* name)
 {
 	if(name == 0) {
 		name = "NO_NAME_GIVEN";
